@@ -1,6 +1,6 @@
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
+    id("org.jetbrains.kotlin.android") version "2.2.0"
     alias(libs.plugins.kotlin.compose)
 }
 
@@ -14,7 +14,7 @@ println("tileUrl: $tileUrl")
 
 android {
     namespace = "com.KFUPM.ai_indoor_nav_mobile"
-    compileSdk = 35
+    compileSdk = 35  // Change from 36 to 35 (36 is not stable yet)
 
     defaultConfig {
         applicationId = "com.KFUPM.ai_indoor_nav_mobile"
@@ -42,23 +42,33 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
     }
 
-    kotlin {
-        jvmToolchain(17)
+    // UNCOMMENT THIS - You need kotlinOptions for Kotlin projects
+    kotlinOptions {
+        jvmTarget = "11"
     }
+
+    // REMOVE/KEEP COMMENTED - This conflicts with kotlinOptions above
+    // kotlin {
+    //     jvmToolchain(24)
+    // }
 }
 
 dependencies {
-    implementation("org.maplibre.gl:android-sdk:11.11.0")
-    implementation("androidx.core:core-ktx:1.16.0")
-    implementation("androidx.appcompat:appcompat:1.7.0")
-    implementation("com.google.android.material:material:1.11.0")
+    implementation(libs.android.sdk)
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.appcompat.v170)
+    implementation(libs.material)
     implementation(libs.androidx.ui.graphics.android)
     implementation(libs.androidx.foundation.android)
     implementation(libs.androidx.material3.android)
     implementation(libs.androidx.ui.text.android)
     implementation(libs.espresso.core)
+    // For coroutines
+    implementation(libs.kotlinx.coroutines.android)
+    // For HTTP requests
+    implementation(libs.okhttp)
 }
