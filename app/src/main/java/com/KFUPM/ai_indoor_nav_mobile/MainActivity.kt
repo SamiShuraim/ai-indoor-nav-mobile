@@ -164,8 +164,8 @@ class MainActivity : AppCompatActivity() {
 
             // Add fill layer for polygon interiors
             val fillLayer = FillLayer(polygonFillLayerId, geoJsonSourceId).withProperties(
-                fillColor("#80FF0000"), // Semi-transparent red
-                fillOpacity(0.6f)
+                fillColor("#80FF0000"), // red
+                fillOpacity(0.83f)
             )
             style.addLayer(fillLayer)
 
