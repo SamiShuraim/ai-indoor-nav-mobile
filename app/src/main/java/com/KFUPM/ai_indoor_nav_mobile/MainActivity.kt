@@ -1,9 +1,11 @@
 package com.KFUPM.ai_indoor_nav_mobile
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
+import android.view.View
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -25,11 +27,14 @@ import kotlinx.coroutines.*
 import okhttp3.*
 import org.maplibre.android.WellKnownTileServer
 import java.io.IOException
+import com.google.android.material.floatingactionbutton.FloatingActionButton
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var mapView: MapView
     private lateinit var mapLibreMap: MapLibreMap
+    private lateinit var fabBluetooth: FloatingActionButton
+    private lateinit var fabSearch: FloatingActionButton
     private val client = OkHttpClient()
     private val apiUrl = "http://192.168.239.223:5090/api/poi"
 
@@ -60,7 +65,12 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         mapView = findViewById(R.id.mapView)
+        fabBluetooth = findViewById(R.id.fabBluetooth)
+        fabSearch = findViewById(R.id.fabSearch)
+        
         mapView.onCreate(savedInstanceState)
+        
+        setupButtonListeners()
 
         Log.d("MyAppTag", "tileUrl: ${BuildConfig.tileUrl}")
 
@@ -72,6 +82,18 @@ class MainActivity : AppCompatActivity() {
                 checkLocationPermission()
                 fetchAndDisplayGeoJson()
             }
+        }
+    }
+
+    private fun setupButtonListeners() {
+        fabBluetooth.setOnClickListener {
+            val intent = Intent(this, BluetoothDevicesActivity::class.java)
+            startActivity(intent)
+        }
+        
+        fabSearch.setOnClickListener {
+            val intent = Intent(this, POISearchActivity::class.java)
+            startActivity(intent)
         }
     }
 
