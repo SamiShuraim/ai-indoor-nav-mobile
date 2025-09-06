@@ -71,4 +71,8 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     // For HTTP requests
     implementation(libs.okhttp)
+    // For MapLibre
+    implementation("org.maplibre.gl:android-sdk:10.2.0")
+    // For Bluetooth
+    implementation("androidx.bluetooth:bluetooth:1.0.0-alpha02")
 }
