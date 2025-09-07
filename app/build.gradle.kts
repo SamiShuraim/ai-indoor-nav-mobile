@@ -1,6 +1,6 @@
 plugins {
     alias(libs.plugins.android.application)
-    id("org.jetbrains.kotlin.android") version "2.2.0"
+    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
 
@@ -42,13 +42,13 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 
     // UNCOMMENT THIS - You need kotlinOptions for Kotlin projects
     kotlinOptions {
-        jvmTarget = "11"
+        jvmTarget = "17"
     }
 
     // REMOVE/KEEP COMMENTED - This conflicts with kotlinOptions above
@@ -60,19 +60,17 @@ android {
 dependencies {
     implementation(libs.android.sdk)
     implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.appcompat.v170)
+    implementation(libs.androidx.appcompat)
     implementation(libs.material)
     implementation(libs.androidx.ui.graphics.android)
     implementation(libs.androidx.foundation.android)
     implementation(libs.androidx.material3.android)
     implementation(libs.androidx.ui.text.android)
-    implementation(libs.espresso.core)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
     // For coroutines
     implementation(libs.kotlinx.coroutines.android)
     // For HTTP requests
     implementation(libs.okhttp)
-    // For MapLibre
-    implementation("org.maplibre.gl:android-sdk:10.2.0")
-    // For Bluetooth
-    implementation("androidx.bluetooth:bluetooth:1.0.0-alpha02")
+    // RecyclerView
+    implementation("androidx.recyclerview:recyclerview:1.3.2")
 }

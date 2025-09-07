@@ -4,6 +4,11 @@ import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
+import android.bluetooth.le.BluetoothLeScanner
+import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanFilter
+import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
@@ -26,6 +31,9 @@ class BluetoothManager(private val context: Context) {
         val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         bluetoothManager.adapter
     }
+    private val bluetoothLeScanner: BluetoothLeScanner? by lazy {
+        bluetoothAdapter?.bluetoothLeScanner
+    }
     
     private val _scannedDevices = MutableStateFlow<List<BluetoothDeviceInfo>>(emptyList())
     val scannedDevices: StateFlow<List<BluetoothDeviceInfo>> = _scannedDevices.asStateFlow()
@@ -34,18 +42,35 @@ class BluetoothManager(private val context: Context) {
     val isScanning: StateFlow<Boolean> = _isScanning.asStateFlow()
     
     private var scanJob: Job? = null
-    private val scanCallback = object : BluetoothAdapter.LeScanCallback {
-        override fun onLeScan(device: BluetoothDevice?, rssi: Int, scanRecord: ByteArray?) {
-            device?.let {
+    private val scanCallback = object : ScanCallback() {
+        override fun onScanResult(callbackType: Int, result: ScanResult) {
+            val device = result.device
+            val rssi = result.rssi
+            val deviceInfo = BluetoothDeviceInfo(
+                name = device.name ?: "Unknown Device",
+                address = device.address,
+                rssi = rssi,
+                distance = calculateDistance(rssi)
+            )
+            updateDeviceList(deviceInfo)
+        }
+
+        override fun onBatchScanResults(results: MutableList<ScanResult>) {
+            for (result in results) {
+                val device = result.device
+                val rssi = result.rssi
                 val deviceInfo = BluetoothDeviceInfo(
-                    name = it.name ?: "Unknown Device",
-                    address = it.address,
+                    name = device.name ?: "Unknown Device",
+                    address = device.address,
                     rssi = rssi,
                     distance = calculateDistance(rssi)
                 )
-                
                 updateDeviceList(deviceInfo)
             }
+        }
+
+        override fun onScanFailed(errorCode: Int) {
+            Log.e("BluetoothManager", "BLE scan failed with code: $errorCode")
         }
     }
     
@@ -99,10 +124,15 @@ class BluetoothManager(private val context: Context) {
         _isScanning.value = true
         _scannedDevices.value = emptyList()
         
+        val settings = ScanSettings.Builder()
+            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .build()
+        val filters: List<ScanFilter> = emptyList()
+
         scanJob = CoroutineScope(Dispatchers.IO).launch {
             try {
-                bluetoothAdapter!!.startLeScan(scanCallback)
-                delay(10000) // Scan for 10 seconds
+                bluetoothLeScanner?.startScan(filters, settings, scanCallback)
+                delay(10000)
                 stopScanning()
             } catch (e: Exception) {
                 Log.e("BluetoothManager", "Error during scanning: ${e.message}")
@@ -113,7 +143,10 @@ class BluetoothManager(private val context: Context) {
     
     fun stopScanning() {
         scanJob?.cancel()
-        bluetoothAdapter?.stopLeScan(scanCallback)
+        try {
+            bluetoothLeScanner?.stopScan(scanCallback)
+        } catch (_: Exception) {
+        }
         _isScanning.value = false
     }
     
@@ -122,8 +155,7 @@ class BluetoothManager(private val context: Context) {
             ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
         } else {
-            ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH) == PackageManager.PERMISSION_GRANTED &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_ADMIN) == PackageManager.PERMISSION_GRANTED
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         }
     }
     
