@@ -73,4 +73,11 @@ dependencies {
     implementation(libs.okhttp)
     // RecyclerView
     implementation("androidx.recyclerview:recyclerview:1.3.2")
+    // Gson for JSON parsing
+    implementation("com.google.code.gson:gson:2.10.1")
+    
+    // Testing dependencies
+    testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test.ext:junit:1.1.5")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
 }

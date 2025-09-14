@@ -1,0 +1,71 @@
+package com.KFUPM.ai_indoor_nav_mobile
+
+/**
+ * API Configuration Constants
+ */
+object ApiConstants {
+    // API Configuration
+    const val API_BASE_URL = "http://localhost:5090"
+    
+    // MapTiler Configuration (if needed)
+    const val MAPTILER_API_KEY = ""
+    const val MAPTILER_STYLE_URL = ""
+    
+    // API Endpoints
+    object Endpoints {
+        const val LOGIN = "/api/Login"
+        const val VALIDATE = "/api/Login/validate"
+        const val DASHBOARD = "/dashboard"
+        
+        // Buildings
+        const val BUILDINGS = "/api/Building"
+        fun buildingById(id: String) = "/api/Building/$id"
+        
+        // Floors
+        const val FLOORS = "/api/Floor"
+        fun floorsByBuilding(buildingId: String) = "/api/Floor?building=$buildingId"
+        fun floorById(id: String) = "/api/Floor/$id"
+        
+        // Beacons
+        const val BEACONS = "/api/Beacon"
+        fun beaconById(id: String) = "/api/Beacon/$id"
+        fun beaconsByFloor(floorId: String) = "/api/Beacon?floor=$floorId"
+        fun beaconByUuid(uuid: String) = "/api/Beacon/uuid/$uuid"
+        const val BEACONS_ACTIVE = "/api/Beacon/active"
+        fun beaconsLowBattery(threshold: Int) = "/api/Beacon/low-battery/$threshold"
+        fun beaconBattery(id: String, level: Int) = "/api/Beacon/$id/battery/$level"
+        fun beaconHeartbeat(id: String) = "/api/Beacon/$id/heartbeat"
+        
+        // Beacon Types
+        const val BEACON_TYPES = "/api/BeaconType"
+        fun beaconTypeById(id: String) = "/api/BeaconType/$id"
+        fun beaconTypeByName(name: String) = "/api/BeaconType/name/$name"
+        
+        // POIs
+        const val POIS = "/api/Poi"
+        fun poiById(id: String) = "/api/Poi/$id"
+        fun poisByFloor(floorId: String) = "/api/Poi?floor=$floorId"
+        
+        // POI Categories
+        const val POI_CATEGORIES = "/api/PoiCategory"
+        fun poiCategoryById(id: String) = "/api/PoiCategory/$id"
+        fun poiCategoryByName(name: String) = "/api/PoiCategory/name/$name"
+        
+        // Route Nodes
+        const val ROUTE_NODES = "/api/RouteNode"
+        fun routeNodeById(id: String) = "/api/RouteNode/$id"
+        fun routeNodesByFloor(floorId: String) = "/api/RouteNode?floor=$floorId"
+    }
+    
+    // Storage Keys
+    object StorageKeys {
+        const val JWT_TOKEN = "jwtToken"
+    }
+    
+    // Request Headers
+    object Headers {
+        const val CONTENT_TYPE = "Content-Type"
+        const val CONTENT_TYPE_JSON = "application/json"
+        const val AUTHORIZATION = "Authorization"
+    }
+}

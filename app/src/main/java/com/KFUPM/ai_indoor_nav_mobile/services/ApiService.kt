@@ -1,0 +1,211 @@
+package com.KFUPM.ai_indoor_nav_mobile.services
+
+import android.util.Log
+import com.KFUPM.ai_indoor_nav_mobile.ApiConstants
+import com.KFUPM.ai_indoor_nav_mobile.models.*
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.*
+import java.io.IOException
+
+class ApiService {
+    private val client = OkHttpClient()
+    private val gson = Gson()
+    
+    companion object {
+        private const val TAG = "ApiService"
+    }
+    
+    /**
+     * Fetch all buildings
+     */
+    suspend fun getBuildings(): List<Building>? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val request = Request.Builder()
+                    .url("${ApiConstants.API_BASE_URL}${ApiConstants.Endpoints.BUILDINGS}")
+                    .build()
+                
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val jsonString = response.body?.string()
+                        if (jsonString != null) {
+                            Log.d(TAG, "Buildings response: $jsonString")
+                            val type = object : TypeToken<List<Building>>() {}.type
+                            gson.fromJson<List<Building>>(jsonString, type)
+                        } else null
+                    } else {
+                        Log.e(TAG, "Failed to fetch buildings: ${response.code}")
+                        null
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error fetching buildings", e)
+                null
+            }
+        }
+    }
+    
+    /**
+     * Fetch floors for a specific building
+     */
+    suspend fun getFloorsByBuilding(buildingId: String): List<Floor>? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val request = Request.Builder()
+                    .url("${ApiConstants.API_BASE_URL}${ApiConstants.Endpoints.floorsByBuilding(buildingId)}")
+                    .build()
+                
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val jsonString = response.body?.string()
+                        if (jsonString != null) {
+                            Log.d(TAG, "Floors response: $jsonString")
+                            val type = object : TypeToken<List<Floor>>() {}.type
+                            gson.fromJson<List<Floor>>(jsonString, type)
+                        } else null
+                    } else {
+                        Log.e(TAG, "Failed to fetch floors: ${response.code}")
+                        null
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error fetching floors", e)
+                null
+            }
+        }
+    }
+    
+    /**
+     * Fetch POIs for a specific floor
+     */
+    suspend fun getPOIsByFloor(floorId: String): List<POI>? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val request = Request.Builder()
+                    .url("${ApiConstants.API_BASE_URL}${ApiConstants.Endpoints.poisByFloor(floorId)}")
+                    .build()
+                
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val jsonString = response.body?.string()
+                        if (jsonString != null) {
+                            Log.d(TAG, "POIs response: $jsonString")
+                            val type = object : TypeToken<List<POI>>() {}.type
+                            gson.fromJson<List<POI>>(jsonString, type)
+                        } else null
+                    } else {
+                        Log.e(TAG, "Failed to fetch POIs: ${response.code}")
+                        null
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error fetching POIs", e)
+                null
+            }
+        }
+    }
+    
+    /**
+     * Fetch beacons for a specific floor
+     */
+    suspend fun getBeaconsByFloor(floorId: String): List<Beacon>? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val request = Request.Builder()
+                    .url("${ApiConstants.API_BASE_URL}${ApiConstants.Endpoints.beaconsByFloor(floorId)}")
+                    .build()
+                
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val jsonString = response.body?.string()
+                        if (jsonString != null) {
+                            Log.d(TAG, "Beacons response: $jsonString")
+                            val type = object : TypeToken<List<Beacon>>() {}.type
+                            gson.fromJson<List<Beacon>>(jsonString, type)
+                        } else null
+                    } else {
+                        Log.e(TAG, "Failed to fetch beacons: ${response.code}")
+                        null
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error fetching beacons", e)
+                null
+            }
+        }
+    }
+    
+    /**
+     * Fetch route nodes for a specific floor
+     */
+    suspend fun getRouteNodesByFloor(floorId: String): List<RouteNode>? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val request = Request.Builder()
+                    .url("${ApiConstants.API_BASE_URL}${ApiConstants.Endpoints.routeNodesByFloor(floorId)}")
+                    .build()
+                
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val jsonString = response.body?.string()
+                        if (jsonString != null) {
+                            Log.d(TAG, "Route nodes response: $jsonString")
+                            val type = object : TypeToken<List<RouteNode>>() {}.type
+                            gson.fromJson<List<RouteNode>>(jsonString, type)
+                        } else null
+                    } else {
+                        Log.e(TAG, "Failed to fetch route nodes: ${response.code}")
+                        null
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error fetching route nodes", e)
+                null
+            }
+        }
+    }
+    
+    /**
+     * Fetch all POIs (legacy support for existing endpoint)
+     */
+    suspend fun getAllPOIs(): List<POI>? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val request = Request.Builder()
+                    .url("${ApiConstants.API_BASE_URL}${ApiConstants.Endpoints.POIS}")
+                    .build()
+                
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val jsonString = response.body?.string()
+                        if (jsonString != null) {
+                            Log.d(TAG, "All POIs response: $jsonString")
+                            // Handle both array and FeatureCollection formats
+                            if (jsonString.trim().startsWith("[")) {
+                                val type = object : TypeToken<List<POI>>() {}.type
+                                gson.fromJson<List<POI>>(jsonString, type)
+                            } else {
+                                // Handle FeatureCollection format if needed
+                                val type = object : TypeToken<List<POI>>() {}.type
+                                gson.fromJson<List<POI>>(jsonString, type)
+                            }
+                        } else null
+                    } else {
+                        Log.e(TAG, "Failed to fetch all POIs: ${response.code}")
+                        null
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error fetching all POIs", e)
+                null
+            }
+        }
+    }
+    
+    fun cleanup() {
+        client.dispatcher.executorService.shutdown()
+    }
+}

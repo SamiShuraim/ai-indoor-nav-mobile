@@ -6,11 +6,17 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
 import android.view.View
+import android.widget.LinearLayout
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.KFUPM.ai_indoor_nav_mobile.BuildConfig
 import com.KFUPM.ai_indoor_nav_mobile.R
+import com.KFUPM.ai_indoor_nav_mobile.models.*
+import com.KFUPM.ai_indoor_nav_mobile.services.ApiService
 import org.maplibre.android.MapLibre
 import org.maplibre.android.location.modes.CameraMode
 import org.maplibre.android.camera.CameraUpdateFactory
@@ -18,11 +24,10 @@ import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.sources.GeoJsonSource
-import org.maplibre.android.style.layers.FillLayer
-import org.maplibre.android.style.layers.LineLayer
+import org.maplibre.android.style.layers.*
 import org.maplibre.android.style.layers.PropertyFactory.*
 import org.maplibre.android.utils.ColorUtils
-import org.maplibre.geojson.FeatureCollection
+import org.maplibre.geojson.*
 import kotlinx.coroutines.*
 import okhttp3.*
 import org.maplibre.android.WellKnownTileServer
@@ -35,13 +40,32 @@ class MainActivity : AppCompatActivity() {
     private lateinit var mapLibreMap: MapLibreMap
     private lateinit var fabBluetooth: FloatingActionButton
     private lateinit var fabSearch: FloatingActionButton
-    private val client = OkHttpClient()
-    private val apiUrl = "http://192.168.239.223:5090/api/poi"
+    private lateinit var floorSelectorContainer: LinearLayout
+    private lateinit var floorRecyclerView: RecyclerView
+    private lateinit var floorSelectorAdapter: FloorSelectorAdapter
+    
+    private val apiService = ApiService()
+    
+    // Data
+    private var currentBuilding: Building? = null
+    private var floors: List<Floor> = emptyList()
+    private var currentFloor: Floor? = null
+    private var currentPOIs: List<POI> = emptyList()
+    private var currentBeacons: List<Beacon> = emptyList()
+    private var currentRouteNodes: List<RouteNode> = emptyList()
 
     // Source and layer IDs
-    private val geoJsonSourceId = "poi-source"
-    private val polygonFillLayerId = "poi-fill-layer"
-    private val polygonStrokeLayerId = "poi-stroke-layer"
+    private val poiSourceId = "poi-source"
+    private val beaconSourceId = "beacon-source"
+    private val routeNodeSourceId = "route-node-source"
+    private val poiFillLayerId = "poi-fill-layer"
+    private val poiStrokeLayerId = "poi-stroke-layer"
+    private val beaconLayerId = "beacon-layer"
+    private val routeNodeLayerId = "route-node-layer"
+    
+    companion object {
+        private const val TAG = "MainActivity"
+    }
 
     private val locationPermissionRequest =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -67,12 +91,14 @@ class MainActivity : AppCompatActivity() {
         mapView = findViewById(R.id.mapView)
         fabBluetooth = findViewById(R.id.fabBluetooth)
         fabSearch = findViewById(R.id.fabSearch)
+        floorSelectorContainer = findViewById(R.id.floorSelectorContainer)
+        floorRecyclerView = findViewById(R.id.floorRecyclerView)
         
+        setupFloorSelector()
         mapView.onCreate(savedInstanceState)
-        
         setupButtonListeners()
 
-        Log.d("MyAppTag", "tileUrl: ${BuildConfig.tileUrl}")
+        Log.d(TAG, "tileUrl: ${BuildConfig.tileUrl}")
 
         mapView.getMapAsync { maplibreMap ->
             mapLibreMap = maplibreMap
@@ -80,9 +106,17 @@ class MainActivity : AppCompatActivity() {
                 Style.Builder().fromUri(BuildConfig.tileUrl)
             ) {
                 checkLocationPermission()
-                fetchAndDisplayGeoJson()
+                initializeAppData()
             }
         }
+    }
+
+    private fun setupFloorSelector() {
+        floorSelectorAdapter = FloorSelectorAdapter(emptyList()) { floor ->
+            onFloorSelected(floor)
+        }
+        floorRecyclerView.layoutManager = LinearLayoutManager(this)
+        floorRecyclerView.adapter = floorSelectorAdapter
     }
 
     private fun setupButtonListeners() {
@@ -132,99 +166,271 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun fetchAndDisplayGeoJson() {
-        val request = Request.Builder()
-            .url(apiUrl)
-            .build()
-
-        // Use coroutine to make async network call
-        CoroutineScope(Dispatchers.IO).launch {
+    /**
+     * Initialize app data by fetching buildings and selecting the first one
+     */
+    private fun initializeAppData() {
+        lifecycleScope.launch {
             try {
-                client.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        Log.e("MyAppTag", "Failed to fetch GeoJSON: ${response.code}")
-                        return@use
-                    }
-
-                    val jsonString = response.body?.string()
-                    if (jsonString != null) {
-                        Log.d("MyAppTag", "Received JSON: $jsonString")
-
-                        // Check if the response is an array and convert to FeatureCollection
-                        val featureCollection = if (jsonString.trim().startsWith("[")) {
-                            val featureCollectionJson = """{"type": "FeatureCollection", "features": $jsonString}"""
-                            FeatureCollection.fromJson(featureCollectionJson)
-                        } else {
-                            FeatureCollection.fromJson(jsonString)
-                        }
-
-                        // Switch to main thread to update UI
-                        withContext(Dispatchers.Main) {
-                            displayGeoJsonFeatures(featureCollection)
-                        }
-                    }
+                Log.d(TAG, "Fetching buildings...")
+                val buildings = apiService.getBuildings()
+                
+                if (buildings.isNullOrEmpty()) {
+                    Log.w(TAG, "No buildings found")
+                    return@launch
                 }
-            } catch (e: IOException) {
-                Log.e("MyAppTag", "Network error: ${e.message}")
+                
+                // Select the first building
+                currentBuilding = buildings.first()
+                Log.d(TAG, "Selected building: ${currentBuilding?.name}")
+                
+                // Fetch floors for the selected building
+                fetchFloorsForBuilding(currentBuilding!!.id)
+                
             } catch (e: Exception) {
-                Log.e("MyAppTag", "Error parsing GeoJSON: ${e.message}")
+                Log.e(TAG, "Error initializing app data", e)
             }
         }
     }
 
-    private fun displayGeoJsonFeatures(featureCollection: FeatureCollection) {
-        val style = mapLibreMap.style
-        if (style == null) {
-            Log.e("MyAppTag", "Map style is null")
-            return
-        }
-
+    /**
+     * Fetch floors for the given building
+     */
+    private suspend fun fetchFloorsForBuilding(buildingId: String) {
         try {
-            // Add GeoJSON source
-            val geoJsonSource = GeoJsonSource(geoJsonSourceId, featureCollection)
-            style.addSource(geoJsonSource)
-
-            // Add fill layer for polygon interiors
-            val fillLayer = FillLayer(polygonFillLayerId, geoJsonSourceId).withProperties(
-                fillColor("#80FF0000"), // red
-                fillOpacity(0.83f)
-            )
-            style.addLayer(fillLayer)
-
-            // Add line layer for polygon outlines
-            val strokeLayer = LineLayer(polygonStrokeLayerId, geoJsonSourceId).withProperties(
-                lineColor("#FF0000"), // Red outline
-                lineWidth(2f),
-                lineOpacity(0.8f)
-            )
-            style.addLayer(strokeLayer)
-
-            Log.d("MyAppTag", "Successfully added ${featureCollection.features()?.size ?: 0} features to map")
-
+            Log.d(TAG, "Fetching floors for building: $buildingId")
+            val buildingFloors = apiService.getFloorsByBuilding(buildingId)
+            
+            if (buildingFloors.isNullOrEmpty()) {
+                Log.w(TAG, "No floors found for building: $buildingId")
+                return
+            }
+            
+            floors = buildingFloors.sortedBy { it.level }
+            Log.d(TAG, "Found ${floors.size} floors")
+            
+            // Update floor selector
+            floorSelectorAdapter.updateFloors(floors)
+            floorSelectorContainer.visibility = View.VISIBLE
+            
+            // Select the first floor
+            if (floors.isNotEmpty()) {
+                selectFloor(floors.first())
+            }
+            
         } catch (e: Exception) {
-            Log.e("MyAppTag", "Error adding layers to map: ${e.message}")
+            Log.e(TAG, "Error fetching floors", e)
         }
     }
 
-    // Method to refresh GeoJSON data (you can call this when needed)
-    private fun refreshGeoJsonData() {
-        val style = mapLibreMap.style
+    /**
+     * Handle floor selection
+     */
+    private fun onFloorSelected(floor: Floor) {
+        Log.d(TAG, "Floor selected: ${floor.name}")
+        selectFloor(floor)
+    }
 
-        // Remove existing layers and source
-        style?.let {
-            if (it.getLayer(polygonStrokeLayerId) != null) {
-                it.removeLayer(polygonStrokeLayerId)
-            }
-            if (it.getLayer(polygonFillLayerId) != null) {
-                it.removeLayer(polygonFillLayerId)
-            }
-            if (it.getSource(geoJsonSourceId) != null) {
-                it.removeSource(geoJsonSourceId)
+    /**
+     * Select and load data for the given floor
+     */
+    private fun selectFloor(floor: Floor) {
+        currentFloor = floor
+        floorSelectorAdapter.setSelectedFloor(floor.id)
+        
+        lifecycleScope.launch {
+            try {
+                Log.d(TAG, "Loading data for floor: ${floor.name}")
+                
+                // Fetch all data for the floor in parallel
+                val poisDeferred = async { apiService.getPOIsByFloor(floor.id) }
+                val beaconsDeferred = async { apiService.getBeaconsByFloor(floor.id) }
+                val routeNodesDeferred = async { apiService.getRouteNodesByFloor(floor.id) }
+                
+                currentPOIs = poisDeferred.await() ?: emptyList()
+                currentBeacons = beaconsDeferred.await() ?: emptyList()
+                currentRouteNodes = routeNodesDeferred.await() ?: emptyList()
+                
+                Log.d(TAG, "Loaded ${currentPOIs.size} POIs, ${currentBeacons.size} beacons, ${currentRouteNodes.size} route nodes")
+                
+                // Update map display
+                updateMapDisplay()
+                
+            } catch (e: Exception) {
+                Log.e(TAG, "Error loading floor data", e)
             }
         }
+    }
 
-        // Fetch and display updated data
-        fetchAndDisplayGeoJson()
+    /**
+     * Update the map display with current floor data
+     */
+    private fun updateMapDisplay() {
+        val style = mapLibreMap.style ?: return
+        
+        try {
+            // Clear existing layers and sources
+            clearMapLayers(style)
+            
+            // Add POIs
+            if (currentPOIs.isNotEmpty()) {
+                addPOIsToMap(style, currentPOIs)
+            }
+            
+            // Add beacons
+            if (currentBeacons.isNotEmpty()) {
+                addBeaconsToMap(style, currentBeacons)
+            }
+            
+            // Add route nodes
+            if (currentRouteNodes.isNotEmpty()) {
+                addRouteNodesToMap(style, currentRouteNodes)
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error updating map display", e)
+        }
+    }
+
+    /**
+     * Clear existing map layers and sources
+     */
+    private fun clearMapLayers(style: Style) {
+        // Remove layers
+        listOf(poiFillLayerId, poiStrokeLayerId, beaconLayerId, routeNodeLayerId).forEach { layerId ->
+            style.getLayer(layerId)?.let { style.removeLayer(layerId) }
+        }
+        
+        // Remove sources
+        listOf(poiSourceId, beaconSourceId, routeNodeSourceId).forEach { sourceId ->
+            style.getSource(sourceId)?.let { style.removeSource(sourceId) }
+        }
+    }
+
+    /**
+     * Add POIs to the map
+     */
+    private fun addPOIsToMap(style: Style, pois: List<POI>) {
+        try {
+            val features = mutableListOf<Feature>()
+            
+            pois.forEach { poi ->
+                if (poi.geometry != null) {
+                    // Use existing geometry if available
+                    val feature = Feature.fromJson(poi.geometry.toString())
+                    feature.addStringProperty("name", poi.name)
+                    feature.addStringProperty("id", poi.id)
+                    features.add(feature)
+                } else {
+                    // Create point feature from coordinates
+                    val point = Point.fromLngLat(poi.x, poi.y)
+                    val feature = Feature.fromGeometry(point)
+                    feature.addStringProperty("name", poi.name)
+                    feature.addStringProperty("id", poi.id)
+                    features.add(feature)
+                }
+            }
+            
+            if (features.isNotEmpty()) {
+                val featureCollection = FeatureCollection.fromFeatures(features)
+                val source = GeoJsonSource(poiSourceId, featureCollection)
+                style.addSource(source)
+                
+                // Add fill layer for polygons
+                val fillLayer = FillLayer(poiFillLayerId, poiSourceId).withProperties(
+                    fillColor("#80FF0000"),
+                    fillOpacity(0.6f)
+                )
+                style.addLayer(fillLayer)
+                
+                // Add stroke layer for outlines
+                val strokeLayer = LineLayer(poiStrokeLayerId, poiSourceId).withProperties(
+                    lineColor("#FF0000"),
+                    lineWidth(2f),
+                    lineOpacity(0.8f)
+                )
+                style.addLayer(strokeLayer)
+                
+                Log.d(TAG, "Added ${features.size} POI features to map")
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error adding POIs to map", e)
+        }
+    }
+
+    /**
+     * Add beacons to the map
+     */
+    private fun addBeaconsToMap(style: Style, beacons: List<Beacon>) {
+        try {
+            val features = beacons.map { beacon ->
+                val point = Point.fromLngLat(beacon.x, beacon.y)
+                val feature = Feature.fromGeometry(point)
+                feature.addStringProperty("name", beacon.name ?: "Beacon ${beacon.id}")
+                feature.addStringProperty("id", beacon.id)
+                feature.addStringProperty("uuid", beacon.uuid)
+                feature
+            }
+            
+            if (features.isNotEmpty()) {
+                val featureCollection = FeatureCollection.fromFeatures(features)
+                val source = GeoJsonSource(beaconSourceId, featureCollection)
+                style.addSource(source)
+                
+                // Add circle layer for beacons
+                val beaconLayer = CircleLayer(beaconLayerId, beaconSourceId).withProperties(
+                    circleRadius(8f),
+                    circleColor("#FFA500"), // Orange
+                    circleOpacity(0.8f),
+                    circleStrokeWidth(2f),
+                    circleStrokeColor("#FF8C00")
+                )
+                style.addLayer(beaconLayer)
+                
+                Log.d(TAG, "Added ${features.size} beacon features to map")
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error adding beacons to map", e)
+        }
+    }
+
+    /**
+     * Add route nodes to the map as small blue dots
+     */
+    private fun addRouteNodesToMap(style: Style, routeNodes: List<RouteNode>) {
+        try {
+            val features = routeNodes.map { node ->
+                val point = Point.fromLngLat(node.x, node.y)
+                val feature = Feature.fromGeometry(point)
+                feature.addStringProperty("name", node.name ?: "Node ${node.id}")
+                feature.addStringProperty("id", node.id)
+                feature.addStringProperty("nodeType", node.nodeType ?: "")
+                feature
+            }
+            
+            if (features.isNotEmpty()) {
+                val featureCollection = FeatureCollection.fromFeatures(features)
+                val source = GeoJsonSource(routeNodeSourceId, featureCollection)
+                style.addSource(source)
+                
+                // Add circle layer for route nodes (small blue dots)
+                val routeNodeLayer = CircleLayer(routeNodeLayerId, routeNodeSourceId).withProperties(
+                    circleRadius(3f), // Small dots
+                    circleColor("#0066FF"), // Blue
+                    circleOpacity(0.8f),
+                    circleStrokeWidth(1f),
+                    circleStrokeColor("#003399")
+                )
+                style.addLayer(routeNodeLayer)
+                
+                Log.d(TAG, "Added ${features.size} route node features to map")
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error adding route nodes to map", e)
+        }
     }
 
     override fun onStart() { super.onStart(); mapView.onStart() }
@@ -235,8 +441,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         mapView.onDestroy()
-        // Clean up HTTP client
-        client.dispatcher.executorService.shutdown()
+        apiService.cleanup()
     }
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)

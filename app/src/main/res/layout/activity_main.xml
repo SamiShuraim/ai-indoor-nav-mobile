@@ -28,4 +28,35 @@
         android:src="@drawable/ic_search"
         android:contentDescription="Search POIs" />
 
+    <!-- Floor Selector Component -->
+    <LinearLayout
+        android:id="@+id/floorSelectorContainer"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="16dp"
+        android:orientation="vertical"
+        android:background="@drawable/floor_selector_background"
+        android:padding="8dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/floorSelectorTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Floors"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textColor="@android:color/white"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginBottom="4dp" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/floorRecyclerView"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+
+    </LinearLayout>
+
 </FrameLayout>
