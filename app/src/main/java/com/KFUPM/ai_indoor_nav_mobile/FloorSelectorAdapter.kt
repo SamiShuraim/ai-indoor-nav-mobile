@@ -1,6 +1,7 @@
 package com.KFUPM.ai_indoor_nav_mobile
 
 import android.graphics.Color
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -28,19 +29,23 @@ class FloorSelectorAdapter(
         val floor = floors[position]
         holder.floorName.text = floor.name
         
-        // Highlight selected floor
-        if (floor.id == selectedFloorId) {
-            holder.floorName.setBackgroundColor(Color.parseColor("#4CAF50"))
-            holder.floorName.setTextColor(Color.WHITE)
-        } else {
-            holder.floorName.setBackgroundColor(Color.TRANSPARENT)
-            holder.floorName.setTextColor(Color.WHITE)
-        }
+        // Set selection state
+        val isSelected = floor.id == selectedFloorId
+        holder.itemView.isSelected = isSelected
+        holder.floorName.isSelected = isSelected
         
+        // Set background using selector
+        holder.floorName.setBackgroundResource(R.drawable.floor_item_selector)
+        holder.floorName.setTextColor(Color.WHITE)
+        
+        // Set click listeners on the item view
         holder.itemView.setOnClickListener {
-            selectedFloorId = floor.id
-            notifyDataSetChanged()
-            onFloorSelected(floor)
+            Log.d("FloorSelector", "Floor clicked: ${floor.name} (id: ${floor.id})")
+            if (selectedFloorId != floor.id) {
+                selectedFloorId = floor.id
+                notifyDataSetChanged()
+                onFloorSelected(floor)
+            }
         }
     }
 

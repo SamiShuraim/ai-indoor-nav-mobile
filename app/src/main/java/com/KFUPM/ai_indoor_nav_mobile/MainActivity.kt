@@ -227,7 +227,7 @@ class MainActivity : AppCompatActivity() {
      * Handle floor selection
      */
     private fun onFloorSelected(floor: Floor) {
-        Log.d(TAG, "Floor selected: ${floor.name}")
+        Log.d(TAG, "Floor selected: ${floor.name} (id: ${floor.id})")
         selectFloor(floor)
     }
 
