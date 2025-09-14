@@ -266,26 +266,40 @@ class MainActivity : AppCompatActivity() {
      * Update the map display with current floor data
      */
     private fun updateMapDisplay() {
-        val style = mapLibreMap.style ?: return
+        val style = mapLibreMap.style
+        if (style == null || !style.isFullyLoaded) {
+            Log.w(TAG, "Map style not ready, skipping update")
+            return
+        }
         
         try {
+            Log.d(TAG, "Updating map display...")
+            
             // Clear existing layers and sources
             clearMapLayers(style)
             
             // Add POIs
             if (currentPOIs.isNotEmpty()) {
                 addPOIsToMap(style, currentPOIs)
+            } else {
+                Log.d(TAG, "No POIs to display")
             }
             
             // Add beacons
             if (currentBeacons.isNotEmpty()) {
                 addBeaconsToMap(style, currentBeacons)
+            } else {
+                Log.d(TAG, "No beacons to display")
             }
             
             // Add route nodes
             if (currentRouteNodes.isNotEmpty()) {
                 addRouteNodesToMap(style, currentRouteNodes)
+            } else {
+                Log.d(TAG, "No route nodes to display")
             }
+            
+            Log.d(TAG, "Map display update completed")
             
         } catch (e: Exception) {
             Log.e(TAG, "Error updating map display", e)
@@ -296,14 +310,32 @@ class MainActivity : AppCompatActivity() {
      * Clear existing map layers and sources
      */
     private fun clearMapLayers(style: Style) {
-        // Remove layers
-        listOf(poiFillLayerId, poiStrokeLayerId, beaconLayerId, routeNodeLayerId).forEach { layerId ->
-            style.getLayer(layerId)?.let { style.removeLayer(layerId) }
-        }
-        
-        // Remove sources
-        listOf(poiSourceId, beaconSourceId, routeNodeSourceId).forEach { sourceId ->
-            style.getSource(sourceId)?.let { style.removeSource(sourceId) }
+        try {
+            // Remove layers first (order matters - layers must be removed before sources)
+            listOf(poiFillLayerId, poiStrokeLayerId, beaconLayerId, routeNodeLayerId).forEach { layerId ->
+                try {
+                    if (style.getLayer(layerId) != null) {
+                        style.removeLayer(layerId)
+                        Log.d(TAG, "Removed layer: $layerId")
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to remove layer $layerId", e)
+                }
+            }
+            
+            // Remove sources after layers
+            listOf(poiSourceId, beaconSourceId, routeNodeSourceId).forEach { sourceId ->
+                try {
+                    if (style.getSource(sourceId) != null) {
+                        style.removeSource(sourceId)
+                        Log.d(TAG, "Removed source: $sourceId")
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to remove source $sourceId", e)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error clearing map layers", e)
         }
     }
 
@@ -312,46 +344,72 @@ class MainActivity : AppCompatActivity() {
      */
     private fun addPOIsToMap(style: Style, pois: List<POI>) {
         try {
+            if (pois.isEmpty()) {
+                Log.d(TAG, "No POIs to add")
+                return
+            }
+            
+            // Ensure source doesn't already exist
+            if (style.getSource(poiSourceId) != null) {
+                Log.w(TAG, "POI source already exists, skipping")
+                return
+            }
+            
             val features = mutableListOf<Feature>()
             
             pois.forEach { poi ->
-                if (poi.geometry != null) {
-                    // Use existing geometry if available
-                    val feature = Feature.fromJson(poi.geometry.toString())
-                    feature.addStringProperty("name", poi.name)
-                    feature.addStringProperty("id", poi.id)
-                    features.add(feature)
-                } else {
-                    // Create point feature from coordinates
-                    val point = Point.fromLngLat(poi.x, poi.y)
-                    val feature = Feature.fromGeometry(point)
-                    feature.addStringProperty("name", poi.name)
-                    feature.addStringProperty("id", poi.id)
-                    features.add(feature)
+                try {
+                    if (poi.geometry != null) {
+                        // Use existing geometry if available
+                        val feature = Feature.fromJson(poi.geometry.toString())
+                        feature.addStringProperty("name", poi.name)
+                        feature.addStringProperty("id", poi.id)
+                        features.add(feature)
+                    } else {
+                        // Create point feature from coordinates
+                        val point = Point.fromLngLat(poi.x, poi.y)
+                        val feature = Feature.fromGeometry(point)
+                        feature.addStringProperty("name", poi.name)
+                        feature.addStringProperty("id", poi.id)
+                        features.add(feature)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to create feature for POI ${poi.id}", e)
                 }
             }
             
             if (features.isNotEmpty()) {
                 val featureCollection = FeatureCollection.fromFeatures(features)
                 val source = GeoJsonSource(poiSourceId, featureCollection)
+                
+                // Add source
                 style.addSource(source)
+                Log.d(TAG, "Added POI source with ${features.size} features")
                 
-                // Add fill layer for polygons
-                val fillLayer = FillLayer(poiFillLayerId, poiSourceId).withProperties(
-                    fillColor("#80FF0000"),
-                    fillOpacity(0.6f)
-                )
-                style.addLayer(fillLayer)
+                // Add fill layer for polygons (only if layer doesn't exist)
+                if (style.getLayer(poiFillLayerId) == null) {
+                    val fillLayer = FillLayer(poiFillLayerId, poiSourceId).withProperties(
+                        fillColor("#80FF0000"),
+                        fillOpacity(0.6f)
+                    )
+                    style.addLayer(fillLayer)
+                    Log.d(TAG, "Added POI fill layer")
+                }
                 
-                // Add stroke layer for outlines
-                val strokeLayer = LineLayer(poiStrokeLayerId, poiSourceId).withProperties(
-                    lineColor("#FF0000"),
-                    lineWidth(2f),
-                    lineOpacity(0.8f)
-                )
-                style.addLayer(strokeLayer)
+                // Add stroke layer for outlines (only if layer doesn't exist)
+                if (style.getLayer(poiStrokeLayerId) == null) {
+                    val strokeLayer = LineLayer(poiStrokeLayerId, poiSourceId).withProperties(
+                        lineColor("#FF0000"),
+                        lineWidth(2f),
+                        lineOpacity(0.8f)
+                    )
+                    style.addLayer(strokeLayer)
+                    Log.d(TAG, "Added POI stroke layer")
+                }
                 
-                Log.d(TAG, "Added ${features.size} POI features to map")
+                Log.d(TAG, "Successfully added ${features.size} POI features to map")
+            } else {
+                Log.w(TAG, "No valid POI features created")
             }
             
         } catch (e: Exception) {
@@ -364,31 +422,55 @@ class MainActivity : AppCompatActivity() {
      */
     private fun addBeaconsToMap(style: Style, beacons: List<Beacon>) {
         try {
-            val features = beacons.map { beacon ->
-                val point = Point.fromLngLat(beacon.x, beacon.y)
-                val feature = Feature.fromGeometry(point)
-                feature.addStringProperty("name", beacon.name ?: "Beacon ${beacon.id}")
-                feature.addStringProperty("id", beacon.id)
-                feature.addStringProperty("uuid", beacon.uuid)
-                feature
+            if (beacons.isEmpty()) {
+                Log.d(TAG, "No beacons to add")
+                return
+            }
+            
+            // Ensure source doesn't already exist
+            if (style.getSource(beaconSourceId) != null) {
+                Log.w(TAG, "Beacon source already exists, skipping")
+                return
+            }
+            
+            val features = beacons.mapNotNull { beacon ->
+                try {
+                    val point = Point.fromLngLat(beacon.x, beacon.y)
+                    val feature = Feature.fromGeometry(point)
+                    feature.addStringProperty("name", beacon.name ?: "Beacon ${beacon.id}")
+                    feature.addStringProperty("id", beacon.id)
+                    feature.addStringProperty("uuid", beacon.uuid)
+                    feature
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to create feature for beacon ${beacon.id}", e)
+                    null
+                }
             }
             
             if (features.isNotEmpty()) {
                 val featureCollection = FeatureCollection.fromFeatures(features)
                 val source = GeoJsonSource(beaconSourceId, featureCollection)
+                
+                // Add source
                 style.addSource(source)
+                Log.d(TAG, "Added beacon source with ${features.size} features")
                 
-                // Add circle layer for beacons
-                val beaconLayer = CircleLayer(beaconLayerId, beaconSourceId).withProperties(
-                    circleRadius(8f),
-                    circleColor("#FFA500"), // Orange
-                    circleOpacity(0.8f),
-                    circleStrokeWidth(2f),
-                    circleStrokeColor("#FF8C00")
-                )
-                style.addLayer(beaconLayer)
+                // Add circle layer for beacons (only if layer doesn't exist)
+                if (style.getLayer(beaconLayerId) == null) {
+                    val beaconLayer = CircleLayer(beaconLayerId, beaconSourceId).withProperties(
+                        circleRadius(8f),
+                        circleColor("#FFA500"), // Orange
+                        circleOpacity(0.8f),
+                        circleStrokeWidth(2f),
+                        circleStrokeColor("#FF8C00")
+                    )
+                    style.addLayer(beaconLayer)
+                    Log.d(TAG, "Added beacon layer")
+                }
                 
-                Log.d(TAG, "Added ${features.size} beacon features to map")
+                Log.d(TAG, "Successfully added ${features.size} beacon features to map")
+            } else {
+                Log.w(TAG, "No valid beacon features created")
             }
             
         } catch (e: Exception) {
@@ -401,31 +483,55 @@ class MainActivity : AppCompatActivity() {
      */
     private fun addRouteNodesToMap(style: Style, routeNodes: List<RouteNode>) {
         try {
-            val features = routeNodes.map { node ->
-                val point = Point.fromLngLat(node.x, node.y)
-                val feature = Feature.fromGeometry(point)
-                feature.addStringProperty("name", node.name ?: "Node ${node.id}")
-                feature.addStringProperty("id", node.id)
-                feature.addStringProperty("nodeType", node.nodeType ?: "")
-                feature
+            if (routeNodes.isEmpty()) {
+                Log.d(TAG, "No route nodes to add")
+                return
+            }
+            
+            // Ensure source doesn't already exist
+            if (style.getSource(routeNodeSourceId) != null) {
+                Log.w(TAG, "Route node source already exists, skipping")
+                return
+            }
+            
+            val features = routeNodes.mapNotNull { node ->
+                try {
+                    val point = Point.fromLngLat(node.x, node.y)
+                    val feature = Feature.fromGeometry(point)
+                    feature.addStringProperty("name", node.name ?: "Node ${node.id}")
+                    feature.addStringProperty("id", node.id)
+                    feature.addStringProperty("nodeType", node.nodeType ?: "")
+                    feature
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to create feature for route node ${node.id}", e)
+                    null
+                }
             }
             
             if (features.isNotEmpty()) {
                 val featureCollection = FeatureCollection.fromFeatures(features)
                 val source = GeoJsonSource(routeNodeSourceId, featureCollection)
+                
+                // Add source
                 style.addSource(source)
+                Log.d(TAG, "Added route node source with ${features.size} features")
                 
-                // Add circle layer for route nodes (small blue dots)
-                val routeNodeLayer = CircleLayer(routeNodeLayerId, routeNodeSourceId).withProperties(
-                    circleRadius(3f), // Small dots
-                    circleColor("#0066FF"), // Blue
-                    circleOpacity(0.8f),
-                    circleStrokeWidth(1f),
-                    circleStrokeColor("#003399")
-                )
-                style.addLayer(routeNodeLayer)
+                // Add circle layer for route nodes (only if layer doesn't exist)
+                if (style.getLayer(routeNodeLayerId) == null) {
+                    val routeNodeLayer = CircleLayer(routeNodeLayerId, routeNodeSourceId).withProperties(
+                        circleRadius(3f), // Small dots
+                        circleColor("#0066FF"), // Blue
+                        circleOpacity(0.8f),
+                        circleStrokeWidth(1f),
+                        circleStrokeColor("#003399")
+                    )
+                    style.addLayer(routeNodeLayer)
+                    Log.d(TAG, "Added route node layer")
+                }
                 
-                Log.d(TAG, "Added ${features.size} route node features to map")
+                Log.d(TAG, "Successfully added ${features.size} route node features to map")
+            } else {
+                Log.w(TAG, "No valid route node features created")
             }
             
         } catch (e: Exception) {
