@@ -4,8 +4,8 @@ package com.KFUPM.ai_indoor_nav_mobile
  * API Configuration Constants
  */
 object ApiConstants {
-    // API Configuration
-    const val API_BASE_URL = "http://localhost:5090"
+    // API Configuration - Use 10.0.2.2 for Android emulator to access host localhost
+    const val API_BASE_URL = "http://10.0.2.2:5090"
     
     // MapTiler Configuration (if needed)
     const val MAPTILER_API_KEY = ""
