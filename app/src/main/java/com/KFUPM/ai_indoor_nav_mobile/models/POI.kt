@@ -4,25 +4,25 @@ import com.google.gson.annotations.SerializedName
 
 data class POI(
     @SerializedName("id")
-    val id: String,
+    val id: String?,
     
     @SerializedName("name")
-    val name: String,
+    val name: String?,
     
     @SerializedName("description")
     val description: String? = null,
     
     @SerializedName("floorId")
-    val floorId: String,
+    val floorId: String? = null,
     
     @SerializedName("categoryId")
     val categoryId: String? = null,
     
     @SerializedName("x")
-    val x: Double,
+    val x: Double = 0.0,
     
     @SerializedName("y")
-    val y: Double,
+    val y: Double = 0.0,
     
     @SerializedName("latitude")
     val latitude: Double? = null,

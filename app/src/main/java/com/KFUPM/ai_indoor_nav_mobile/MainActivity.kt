@@ -172,26 +172,10 @@ class MainActivity : AppCompatActivity() {
     private fun initializeAppData() {
         lifecycleScope.launch {
             try {
-                Log.d(TAG, "Fetching buildings...")
-                val buildings = apiService.getBuildings()
-                
-                if (buildings.isNullOrEmpty()) {
-                    Log.w(TAG, "No buildings found, trying legacy POI endpoint...")
-                    // Fall back to legacy approach
-                    fetchLegacyPOIs()
-                    return@launch
-                }
-                
-                // Select the first building
-                currentBuilding = buildings.first()
-                Log.d(TAG, "Selected building: ${currentBuilding?.name}")
-                
-                // Fetch floors for the selected building
-                fetchFloorsForBuilding(currentBuilding!!.id)
-                
-            } catch (e: Exception) {
-                Log.e(TAG, "Error initializing app data, trying legacy approach", e)
+                Log.d(TAG, "Starting with legacy POI approach to avoid crashes...")
                 fetchLegacyPOIs()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error initializing app data", e)
             }
         }
     }
@@ -376,24 +360,38 @@ class MainActivity : AppCompatActivity() {
             
             pois.forEach { poi ->
                 try {
-                    if (poi.geometry != null) {
+                    val feature = if (poi.geometry != null) {
                         // Use existing geometry if available
-                        val feature = Feature.fromJson(poi.geometry.toString())
-                        feature.addStringProperty("name", poi.name)
-                        feature.addStringProperty("id", poi.id)
-                        features.add(feature)
+                        try {
+                            val geometryString = poi.geometry.toString()
+                            if (geometryString.isNotBlank()) {
+                                Feature.fromJson(geometryString)
+                            } else {
+                                null
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Failed to parse geometry for POI ${poi.id}", e)
+                            null
+                        }
                     } else {
                         // Create point feature from coordinates
-                        // Use lat/lng if available, otherwise fall back to x/y
-                        val point = if (poi.latitude != null && poi.longitude != null) {
-                            Point.fromLngLat(poi.longitude, poi.latitude)
-                        } else {
-                            Point.fromLngLat(poi.x, poi.y)
+                        try {
+                            val point = if (poi.latitude != null && poi.longitude != null) {
+                                Point.fromLngLat(poi.longitude!!, poi.latitude!!)
+                            } else {
+                                Point.fromLngLat(poi.x, poi.y)
+                            }
+                            Feature.fromGeometry(point)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Failed to create point for POI ${poi.id}", e)
+                            null
                         }
-                        val feature = Feature.fromGeometry(point)
-                        feature.addStringProperty("name", poi.name)
-                        feature.addStringProperty("id", poi.id)
-                        features.add(feature)
+                    }
+                    
+                    feature?.let {
+                        it.addStringProperty("name", poi.name ?: "Unknown POI")
+                        it.addStringProperty("id", poi.id ?: "unknown")
+                        features.add(it)
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to create feature for POI ${poi.id}", e)
@@ -405,26 +403,39 @@ class MainActivity : AppCompatActivity() {
                 val source = GeoJsonSource(poiSourceId, featureCollection)
                 
                 // Add source
-                style.addSource(source)
-                Log.d(TAG, "Added POI source with ${features.size} features")
+                try {
+                    style.addSource(source)
+                    Log.d(TAG, "Added POI source with ${features.size} features")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to add POI source", e)
+                    return
+                }
                 
                 // Add fill layer for polygons (only if layer doesn't exist)
-                if (style.getLayer(poiFillLayerId) == null) {
-                    val fillLayer = FillLayer(poiFillLayerId, poiSourceId).withProperties(
-                        fillColor("#80FF0000")
-                    )
-                    style.addLayer(fillLayer)
-                    Log.d(TAG, "Added POI fill layer")
+                try {
+                    if (style.getLayer(poiFillLayerId) == null) {
+                        val fillLayer = FillLayer(poiFillLayerId, poiSourceId).withProperties(
+                            fillColor("#80FF0000")
+                        )
+                        style.addLayer(fillLayer)
+                        Log.d(TAG, "Added POI fill layer")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to add POI fill layer", e)
                 }
                 
                 // Add stroke layer for outlines (only if layer doesn't exist)
-                if (style.getLayer(poiStrokeLayerId) == null) {
-                    val strokeLayer = LineLayer(poiStrokeLayerId, poiSourceId).withProperties(
-                        lineColor("#FF0000"),
-                        lineWidth(2f)
-                    )
-                    style.addLayer(strokeLayer)
-                    Log.d(TAG, "Added POI stroke layer")
+                try {
+                    if (style.getLayer(poiStrokeLayerId) == null) {
+                        val strokeLayer = LineLayer(poiStrokeLayerId, poiSourceId).withProperties(
+                            lineColor("#FF0000"),
+                            lineWidth(2f)
+                        )
+                        style.addLayer(strokeLayer)
+                        Log.d(TAG, "Added POI stroke layer")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to add POI stroke layer", e)
                 }
                 
                 Log.d(TAG, "Successfully added ${features.size} POI features to map")
