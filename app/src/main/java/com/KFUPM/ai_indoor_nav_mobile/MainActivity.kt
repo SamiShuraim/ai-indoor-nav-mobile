@@ -253,8 +253,22 @@ class MainActivity : AppCompatActivity() {
                 
                 Log.d(TAG, "Loaded ${currentPOIs.size} POIs, ${currentBeacons.size} beacons, ${currentRouteNodes.size} route nodes")
                 
+                // Debug coordinate information
+                currentPOIs.forEach { poi ->
+                    Log.d(TAG, "POI ${poi.name}: x=${poi.x}, y=${poi.y}, lat=${poi.latitude}, lng=${poi.longitude}")
+                }
+                currentBeacons.take(3).forEach { beacon -> // Only log first 3 to avoid spam
+                    Log.d(TAG, "Beacon ${beacon.name}: x=${beacon.x}, y=${beacon.y}, lat=${beacon.latitude}, lng=${beacon.longitude}")
+                }
+                currentRouteNodes.take(3).forEach { node ->
+                    Log.d(TAG, "Route node ${node.name}: x=${node.x}, y=${node.y}, lat=${node.latitude}, lng=${node.longitude}")
+                }
+                
                 // Update map display
                 updateMapDisplay()
+                
+                // Fit map to show all features
+                fitMapToFeatures()
                 
             } catch (e: Exception) {
                 Log.e(TAG, "Error loading floor data", e)
@@ -367,7 +381,12 @@ class MainActivity : AppCompatActivity() {
                         features.add(feature)
                     } else {
                         // Create point feature from coordinates
-                        val point = Point.fromLngLat(poi.x, poi.y)
+                        // Use lat/lng if available, otherwise fall back to x/y
+                        val point = if (poi.latitude != null && poi.longitude != null) {
+                            Point.fromLngLat(poi.longitude, poi.latitude)
+                        } else {
+                            Point.fromLngLat(poi.x, poi.y)
+                        }
                         val feature = Feature.fromGeometry(point)
                         feature.addStringProperty("name", poi.name)
                         feature.addStringProperty("id", poi.id)
@@ -435,7 +454,12 @@ class MainActivity : AppCompatActivity() {
             
             val features = beacons.mapNotNull { beacon ->
                 try {
-                    val point = Point.fromLngLat(beacon.x, beacon.y)
+                    // Use lat/lng if available, otherwise fall back to x/y
+                    val point = if (beacon.latitude != null && beacon.longitude != null) {
+                        Point.fromLngLat(beacon.longitude, beacon.latitude)
+                    } else {
+                        Point.fromLngLat(beacon.x, beacon.y)
+                    }
                     val feature = Feature.fromGeometry(point)
                     feature.addStringProperty("name", beacon.name ?: "Beacon ${beacon.id}")
                     feature.addStringProperty("id", beacon.id)
@@ -496,7 +520,12 @@ class MainActivity : AppCompatActivity() {
             
             val features = routeNodes.mapNotNull { node ->
                 try {
-                    val point = Point.fromLngLat(node.x, node.y)
+                    // Use lat/lng if available, otherwise fall back to x/y
+                    val point = if (node.latitude != null && node.longitude != null) {
+                        Point.fromLngLat(node.longitude, node.latitude)
+                    } else {
+                        Point.fromLngLat(node.x, node.y)
+                    }
                     val feature = Feature.fromGeometry(point)
                     feature.addStringProperty("name", node.name ?: "Node ${node.id}")
                     feature.addStringProperty("id", node.id)
@@ -536,6 +565,80 @@ class MainActivity : AppCompatActivity() {
             
         } catch (e: Exception) {
             Log.e(TAG, "Error adding route nodes to map", e)
+        }
+    }
+
+    /**
+     * Fit the map view to show all loaded features
+     */
+    private fun fitMapToFeatures() {
+        try {
+            val allCoordinates = mutableListOf<Point>()
+            
+            // Collect all coordinates
+            currentPOIs.forEach { poi ->
+                val point = if (poi.latitude != null && poi.longitude != null) {
+                    Point.fromLngLat(poi.longitude, poi.latitude)
+                } else {
+                    Point.fromLngLat(poi.x, poi.y)
+                }
+                allCoordinates.add(point)
+            }
+            
+            currentBeacons.forEach { beacon ->
+                val point = if (beacon.latitude != null && beacon.longitude != null) {
+                    Point.fromLngLat(beacon.longitude, beacon.latitude)
+                } else {
+                    Point.fromLngLat(beacon.x, beacon.y)
+                }
+                allCoordinates.add(point)
+            }
+            
+            currentRouteNodes.forEach { node ->
+                val point = if (node.latitude != null && node.longitude != null) {
+                    Point.fromLngLat(node.longitude, node.latitude)
+                } else {
+                    Point.fromLngLat(node.x, node.y)
+                }
+                allCoordinates.add(point)
+            }
+            
+            if (allCoordinates.isNotEmpty()) {
+                // Calculate bounds
+                var minLng = allCoordinates[0].longitude()
+                var maxLng = allCoordinates[0].longitude()
+                var minLat = allCoordinates[0].latitude()
+                var maxLat = allCoordinates[0].latitude()
+                
+                allCoordinates.forEach { point ->
+                    minLng = minOf(minLng, point.longitude())
+                    maxLng = maxOf(maxLng, point.longitude())
+                    minLat = minOf(minLat, point.latitude())
+                    maxLat = maxOf(maxLat, point.latitude())
+                }
+                
+                Log.d(TAG, "Feature bounds: lng[$minLng, $maxLng], lat[$minLat, $maxLat]")
+                
+                // Create bounds and fit camera
+                val bounds = org.maplibre.android.geometry.LatLngBounds.Builder()
+                    .include(org.maplibre.android.geometry.LatLng(minLat, minLng))
+                    .include(org.maplibre.android.geometry.LatLng(maxLat, maxLng))
+                    .build()
+                
+                // Add padding and animate to bounds
+                val padding = 100 // pixels
+                mapLibreMap.animateCamera(
+                    CameraUpdateFactory.newLatLngBounds(bounds, padding),
+                    1000 // animation duration in ms
+                )
+                
+                Log.d(TAG, "Map fitted to ${allCoordinates.size} features")
+            } else {
+                Log.w(TAG, "No coordinates to fit map to")
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error fitting map to features", e)
         }
     }
 
