@@ -176,7 +176,9 @@ class MainActivity : AppCompatActivity() {
                 val buildings = apiService.getBuildings()
                 
                 if (buildings.isNullOrEmpty()) {
-                    Log.w(TAG, "No buildings found")
+                    Log.w(TAG, "No buildings found, trying legacy POI endpoint...")
+                    // Fall back to legacy approach
+                    fetchLegacyPOIs()
                     return@launch
                 }
                 
@@ -188,7 +190,8 @@ class MainActivity : AppCompatActivity() {
                 fetchFloorsForBuilding(currentBuilding!!.id)
                 
             } catch (e: Exception) {
-                Log.e(TAG, "Error initializing app data", e)
+                Log.e(TAG, "Error initializing app data, trying legacy approach", e)
+                fetchLegacyPOIs()
             }
         }
     }
@@ -408,8 +411,7 @@ class MainActivity : AppCompatActivity() {
                 // Add fill layer for polygons (only if layer doesn't exist)
                 if (style.getLayer(poiFillLayerId) == null) {
                     val fillLayer = FillLayer(poiFillLayerId, poiSourceId).withProperties(
-                        fillColor("#80FF0000"),
-                        fillOpacity(0.6f)
+                        fillColor("#80FF0000")
                     )
                     style.addLayer(fillLayer)
                     Log.d(TAG, "Added POI fill layer")
@@ -419,8 +421,7 @@ class MainActivity : AppCompatActivity() {
                 if (style.getLayer(poiStrokeLayerId) == null) {
                     val strokeLayer = LineLayer(poiStrokeLayerId, poiSourceId).withProperties(
                         lineColor("#FF0000"),
-                        lineWidth(2f),
-                        lineOpacity(0.8f)
+                        lineWidth(2f)
                     )
                     style.addLayer(strokeLayer)
                     Log.d(TAG, "Added POI stroke layer")
@@ -484,7 +485,6 @@ class MainActivity : AppCompatActivity() {
                     val beaconLayer = CircleLayer(beaconLayerId, beaconSourceId).withProperties(
                         circleRadius(8f),
                         circleColor("#FFA500"), // Orange
-                        circleOpacity(0.8f),
                         circleStrokeWidth(2f),
                         circleStrokeColor("#FF8C00")
                     )
@@ -550,7 +550,6 @@ class MainActivity : AppCompatActivity() {
                     val routeNodeLayer = CircleLayer(routeNodeLayerId, routeNodeSourceId).withProperties(
                         circleRadius(3f), // Small dots
                         circleColor("#0066FF"), // Blue
-                        circleOpacity(0.8f),
                         circleStrokeWidth(1f),
                         circleStrokeColor("#003399")
                     )
@@ -565,6 +564,143 @@ class MainActivity : AppCompatActivity() {
             
         } catch (e: Exception) {
             Log.e(TAG, "Error adding route nodes to map", e)
+        }
+    }
+
+    /**
+     * Legacy POI fetching method (fallback)
+     */
+    private fun fetchLegacyPOIs() {
+        lifecycleScope.launch {
+            try {
+                Log.d(TAG, "Fetching POIs using legacy endpoint...")
+                val pois = apiService.getAllPOIs()
+                
+                if (pois.isNullOrEmpty()) {
+                    Log.w(TAG, "No POIs found in legacy endpoint")
+                    return@launch
+                }
+                
+                currentPOIs = pois
+                Log.d(TAG, "Loaded ${currentPOIs.size} POIs from legacy endpoint")
+                
+                // Debug coordinate information
+                currentPOIs.take(5).forEach { poi ->
+                    Log.d(TAG, "POI ${poi.name}: x=${poi.x}, y=${poi.y}, lat=${poi.latitude}, lng=${poi.longitude}")
+                }
+                
+                // Display using simple approach
+                displayLegacyPOIs()
+                
+            } catch (e: Exception) {
+                Log.e(TAG, "Error fetching legacy POIs", e)
+            }
+        }
+    }
+
+    /**
+     * Display POIs using the original simple approach
+     */
+    private fun displayLegacyPOIs() {
+        val style = mapLibreMap.style
+        if (style == null || !style.isFullyLoaded) {
+            Log.w(TAG, "Map style not ready for legacy POI display")
+            return
+        }
+        
+        try {
+            Log.d(TAG, "Displaying legacy POIs...")
+            
+            val features = mutableListOf<Feature>()
+            
+            currentPOIs.forEach { poi ->
+                try {
+                    if (poi.geometry != null) {
+                        val feature = Feature.fromJson(poi.geometry.toString())
+                        feature.addStringProperty("name", poi.name)
+                        feature.addStringProperty("id", poi.id)
+                        features.add(feature)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to create legacy feature for POI ${poi.id}", e)
+                }
+            }
+            
+            if (features.isNotEmpty()) {
+                // Check if the response is an array and convert to FeatureCollection
+                val featureCollection = FeatureCollection.fromFeatures(features)
+                
+                // Remove existing layers first
+                try {
+                    style.getLayer("poi-fill-layer")?.let { style.removeLayer("poi-fill-layer") }
+                    style.getLayer("poi-stroke-layer")?.let { style.removeLayer("poi-stroke-layer") }
+                    style.getSource("poi-source")?.let { style.removeSource("poi-source") }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error removing existing legacy layers", e)
+                }
+                
+                // Add GeoJSON source
+                val geoJsonSource = GeoJsonSource("poi-source", featureCollection)
+                style.addSource(geoJsonSource)
+                
+                // Add fill layer for polygon interiors
+                val fillLayer = FillLayer("poi-fill-layer", "poi-source").withProperties(
+                    fillColor("#80FF0000") // red
+                )
+                style.addLayer(fillLayer)
+                
+                // Add line layer for polygon outlines
+                val strokeLayer = LineLayer("poi-stroke-layer", "poi-source").withProperties(
+                    lineColor("#FF0000"), // Red outline
+                    lineWidth(2f)
+                )
+                style.addLayer(strokeLayer)
+                
+                Log.d(TAG, "Successfully added ${features.size} legacy POI features to map")
+                
+                // Try to fit map to features
+                fitMapToLegacyFeatures(features)
+            } else {
+                Log.w(TAG, "No valid legacy POI features created")
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error displaying legacy POIs", e)
+        }
+    }
+
+    /**
+     * Fit map to legacy features
+     */
+    private fun fitMapToLegacyFeatures(features: List<Feature>) {
+        try {
+            if (features.isEmpty()) return
+            
+            // Extract coordinates from features
+            val coordinates = mutableListOf<org.maplibre.android.geometry.LatLng>()
+            
+            features.forEach { feature ->
+                val geometry = feature.geometry()
+                if (geometry is Point) {
+                    coordinates.add(org.maplibre.android.geometry.LatLng(geometry.latitude(), geometry.longitude()))
+                }
+            }
+            
+            if (coordinates.isNotEmpty()) {
+                val bounds = org.maplibre.android.geometry.LatLngBounds.Builder()
+                coordinates.forEach { bounds.include(it) }
+                
+                val padding = 100
+                mapLibreMap.animateCamera(
+                    CameraUpdateFactory.newLatLngBounds(bounds.build(), padding),
+                    1000
+                )
+                
+                Log.d(TAG, "Fitted map to ${coordinates.size} legacy coordinates")
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error fitting map to legacy features", e)
         }
     }
 
