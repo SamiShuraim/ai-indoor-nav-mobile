@@ -51,7 +51,7 @@ class ApiService {
     /**
      * Fetch floors for a specific building
      */
-    suspend fun getFloorsByBuilding(buildingId: String): List<Floor>? {
+    suspend fun getFloorsByBuilding(buildingId: Int): List<Floor>? {
         return withContext(Dispatchers.IO) {
             try {
                 val request = Request.Builder()
@@ -81,7 +81,7 @@ class ApiService {
     /**
      * Fetch POIs for a specific floor
      */
-    suspend fun getPOIsByFloor(floorId: String): List<POI>? {
+    suspend fun getPOIsByFloor(floorId: Int): List<POI>? {
         return withContext(Dispatchers.IO) {
             try {
                 val request = Request.Builder()
@@ -111,7 +111,7 @@ class ApiService {
     /**
      * Fetch beacons for a specific floor
      */
-    suspend fun getBeaconsByFloor(floorId: String): List<Beacon>? {
+    suspend fun getBeaconsByFloor(floorId: Int): List<Beacon>? {
         return withContext(Dispatchers.IO) {
             try {
                 val request = Request.Builder()
@@ -141,7 +141,7 @@ class ApiService {
     /**
      * Fetch route nodes for a specific floor
      */
-    suspend fun getRouteNodesByFloor(floorId: String): List<RouteNode>? {
+    suspend fun getRouteNodesByFloor(floorId: Int): List<RouteNode>? {
         return withContext(Dispatchers.IO) {
             try {
                 val request = Request.Builder()

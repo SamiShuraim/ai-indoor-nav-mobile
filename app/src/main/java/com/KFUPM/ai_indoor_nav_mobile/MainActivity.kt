@@ -183,7 +183,7 @@ class MainActivity : AppCompatActivity() {
     /**
      * Fetch floors for the given building
      */
-    private suspend fun fetchFloorsForBuilding(buildingId: String) {
+    private suspend fun fetchFloorsForBuilding(buildingId: Int) {
         try {
             Log.d(TAG, "Fetching floors for building: $buildingId")
             val buildingFloors = apiService.getFloorsByBuilding(buildingId)
@@ -193,7 +193,7 @@ class MainActivity : AppCompatActivity() {
                 return
             }
             
-            floors = buildingFloors.sortedBy { it.level }
+            floors = buildingFloors.sortedBy { it.floorNumber }
             Log.d(TAG, "Found ${floors.size} floors")
             
             // Update floor selector
@@ -390,7 +390,7 @@ class MainActivity : AppCompatActivity() {
                     
                     feature?.let {
                         it.addStringProperty("name", poi.name ?: "Unknown POI")
-                        it.addStringProperty("id", poi.id ?: "unknown")
+                        it.addStringProperty("id", poi.id?.toString() ?: "unknown")
                         features.add(it)
                     }
                 } catch (e: Exception) {
@@ -466,16 +466,18 @@ class MainActivity : AppCompatActivity() {
             
             val features = beacons.mapNotNull { beacon ->
                 try {
-                    // Use lat/lng if available, otherwise fall back to x/y
-                    val point = if (beacon.latitude != null && beacon.longitude != null) {
-                        Point.fromLngLat(beacon.longitude, beacon.latitude)
+                    // Use lat/lng if available, otherwise fall back to x/y  
+                    val lat = beacon.latitude
+                    val lng = beacon.longitude
+                    val point = if (lat != null && lng != null) {
+                        Point.fromLngLat(lng, lat)
                     } else {
                         Point.fromLngLat(beacon.x, beacon.y)
                     }
                     val feature = Feature.fromGeometry(point)
                     feature.addStringProperty("name", beacon.name ?: "Beacon ${beacon.id}")
-                    feature.addStringProperty("id", beacon.id)
-                    feature.addStringProperty("uuid", beacon.uuid)
+                    feature.addStringProperty("id", beacon.id.toString())
+                    feature.addStringProperty("uuid", beacon.uuid ?: "")
                     feature
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to create feature for beacon ${beacon.id}", e)
@@ -532,14 +534,16 @@ class MainActivity : AppCompatActivity() {
             val features = routeNodes.mapNotNull { node ->
                 try {
                     // Use lat/lng if available, otherwise fall back to x/y
-                    val point = if (node.latitude != null && node.longitude != null) {
-                        Point.fromLngLat(node.longitude, node.latitude)
+                    val lat = node.latitude
+                    val lng = node.longitude
+                    val point = if (lat != null && lng != null) {
+                        Point.fromLngLat(lng, lat)
                     } else {
                         Point.fromLngLat(node.x, node.y)
                     }
                     val feature = Feature.fromGeometry(point)
                     feature.addStringProperty("name", node.name ?: "Node ${node.id}")
-                    feature.addStringProperty("id", node.id)
+                    feature.addStringProperty("id", node.id.toString())
                     feature.addStringProperty("nodeType", node.nodeType ?: "")
                     feature
                 } catch (e: Exception) {
@@ -628,8 +632,8 @@ class MainActivity : AppCompatActivity() {
                 try {
                     if (poi.geometry != null) {
                         val feature = Feature.fromJson(poi.geometry.toString())
-                        feature.addStringProperty("name", poi.name)
-                        feature.addStringProperty("id", poi.id)
+                        feature.addStringProperty("name", poi.name ?: "Unknown POI")
+                        feature.addStringProperty("id", poi.id?.toString() ?: "unknown")
                         features.add(feature)
                     }
                 } catch (e: Exception) {
@@ -724,8 +728,10 @@ class MainActivity : AppCompatActivity() {
             
             // Collect all coordinates
             currentPOIs.forEach { poi ->
-                val point = if (poi.latitude != null && poi.longitude != null) {
-                    Point.fromLngLat(poi.longitude, poi.latitude)
+                val lat = poi.latitude
+                val lng = poi.longitude
+                val point = if (lat != null && lng != null) {
+                    Point.fromLngLat(lng, lat)
                 } else {
                     Point.fromLngLat(poi.x, poi.y)
                 }
@@ -733,8 +739,10 @@ class MainActivity : AppCompatActivity() {
             }
             
             currentBeacons.forEach { beacon ->
-                val point = if (beacon.latitude != null && beacon.longitude != null) {
-                    Point.fromLngLat(beacon.longitude, beacon.latitude)
+                val lat = beacon.latitude
+                val lng = beacon.longitude
+                val point = if (lat != null && lng != null) {
+                    Point.fromLngLat(lng, lat)
                 } else {
                     Point.fromLngLat(beacon.x, beacon.y)
                 }
@@ -742,8 +750,10 @@ class MainActivity : AppCompatActivity() {
             }
             
             currentRouteNodes.forEach { node ->
-                val point = if (node.latitude != null && node.longitude != null) {
-                    Point.fromLngLat(node.longitude, node.latitude)
+                val lat = node.latitude
+                val lng = node.longitude
+                val point = if (lat != null && lng != null) {
+                    Point.fromLngLat(lng, lat)
                 } else {
                     Point.fromLngLat(node.x, node.y)
                 }

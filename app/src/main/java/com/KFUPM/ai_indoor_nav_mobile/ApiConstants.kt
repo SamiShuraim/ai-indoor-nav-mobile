@@ -19,42 +19,42 @@ object ApiConstants {
         
         // Buildings
         const val BUILDINGS = "/api/Building"
-        fun buildingById(id: String) = "/api/Building/$id"
+        fun buildingById(id: Int) = "/api/Building/$id"
         
         // Floors
         const val FLOORS = "/api/Floor"
-        fun floorsByBuilding(buildingId: String) = "/api/Floor?building=$buildingId"
-        fun floorById(id: String) = "/api/Floor/$id"
+        fun floorsByBuilding(buildingId: Int) = "/api/Floor?building=$buildingId"
+        fun floorById(id: Int) = "/api/Floor/$id"
         
         // Beacons
         const val BEACONS = "/api/Beacon"
-        fun beaconById(id: String) = "/api/Beacon/$id"
-        fun beaconsByFloor(floorId: String) = "/api/Beacon?floor=$floorId"
+        fun beaconById(id: Int) = "/api/Beacon/$id"
+        fun beaconsByFloor(floorId: Int) = "/api/Beacon?floor=$floorId"
         fun beaconByUuid(uuid: String) = "/api/Beacon/uuid/$uuid"
         const val BEACONS_ACTIVE = "/api/Beacon/active"
         fun beaconsLowBattery(threshold: Int) = "/api/Beacon/low-battery/$threshold"
-        fun beaconBattery(id: String, level: Int) = "/api/Beacon/$id/battery/$level"
-        fun beaconHeartbeat(id: String) = "/api/Beacon/$id/heartbeat"
+        fun beaconBattery(id: Int, level: Int) = "/api/Beacon/$id/battery/$level"
+        fun beaconHeartbeat(id: Int) = "/api/Beacon/$id/heartbeat"
         
         // Beacon Types
         const val BEACON_TYPES = "/api/BeaconType"
-        fun beaconTypeById(id: String) = "/api/BeaconType/$id"
+        fun beaconTypeById(id: Int) = "/api/BeaconType/$id"
         fun beaconTypeByName(name: String) = "/api/BeaconType/name/$name"
         
         // POIs
         const val POIS = "/api/Poi"
-        fun poiById(id: String) = "/api/Poi/$id"
-        fun poisByFloor(floorId: String) = "/api/Poi?floor=$floorId"
+        fun poiById(id: Int) = "/api/Poi/$id"
+        fun poisByFloor(floorId: Int) = "/api/Poi?floor=$floorId"
         
         // POI Categories
         const val POI_CATEGORIES = "/api/PoiCategory"
-        fun poiCategoryById(id: String) = "/api/PoiCategory/$id"
+        fun poiCategoryById(id: Int) = "/api/PoiCategory/$id"
         fun poiCategoryByName(name: String) = "/api/PoiCategory/name/$name"
         
         // Route Nodes
         const val ROUTE_NODES = "/api/RouteNode"
-        fun routeNodeById(id: String) = "/api/RouteNode/$id"
-        fun routeNodesByFloor(floorId: String) = "/api/RouteNode?floor=$floorId"
+        fun routeNodeById(id: Int) = "/api/RouteNode/$id"
+        fun routeNodesByFloor(floorId: Int) = "/api/RouteNode?floor=$floorId"
     }
     
     // Storage Keys

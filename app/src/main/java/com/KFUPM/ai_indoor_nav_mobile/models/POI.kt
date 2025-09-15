@@ -4,7 +4,7 @@ import com.google.gson.annotations.SerializedName
 
 data class POI(
     @SerializedName("id")
-    val id: String?,
+    val id: Int?,
     
     @SerializedName("name")
     val name: String?,
@@ -12,34 +12,43 @@ data class POI(
     @SerializedName("description")
     val description: String? = null,
     
-    @SerializedName("floorId")
-    val floorId: String? = null,
+    @SerializedName("floor_id")
+    val floorId: Int? = null,
     
-    @SerializedName("categoryId")
-    val categoryId: String? = null,
+    @SerializedName("category_id")
+    val categoryId: Int? = null,
     
-    @SerializedName("x")
-    val x: Double = 0.0,
+    @SerializedName("poi_type")
+    val poiType: String? = null,
     
-    @SerializedName("y")
-    val y: Double = 0.0,
+    @SerializedName("color")
+    val color: String? = null,
     
-    @SerializedName("latitude")
-    val latitude: Double? = null,
+    @SerializedName("is_visible")
+    val isVisible: Boolean = true,
     
-    @SerializedName("longitude")
-    val longitude: Double? = null,
+    @SerializedName("created_at")
+    val createdAt: String? = null,
+    
+    @SerializedName("updated_at")
+    val updatedAt: String? = null,
     
     @SerializedName("geometry")
-    val geometry: Any? = null, // GeoJSON geometry
+    val geometry: Any? = null, // PostGIS Polygon geometry
     
     @SerializedName("category")
     val category: POICategory? = null
-)
+) {
+    // Computed properties for backward compatibility
+    val x: Double get() = 0.0 // Will be extracted from geometry
+    val y: Double get() = 0.0 // Will be extracted from geometry
+    val latitude: Double? get() = null // Will be extracted from geometry
+    val longitude: Double? get() = null // Will be extracted from geometry
+}
 
 data class POICategory(
     @SerializedName("id")
-    val id: String,
+    val id: Int,
     
     @SerializedName("name")
     val name: String,
@@ -48,8 +57,5 @@ data class POICategory(
     val description: String? = null,
     
     @SerializedName("color")
-    val color: String? = null,
-    
-    @SerializedName("icon")
-    val icon: String? = null
+    val color: String? = null
 )

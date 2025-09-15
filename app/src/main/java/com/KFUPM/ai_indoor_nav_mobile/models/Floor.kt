@@ -4,22 +4,22 @@ import com.google.gson.annotations.SerializedName
 
 data class Floor(
     @SerializedName("id")
-    val id: String,
+    val id: Int,
     
-    @SerializedName("buildingId")
-    val buildingId: String,
+    @SerializedName("building_id")
+    val buildingId: Int,
     
     @SerializedName("name")
     val name: String,
     
-    @SerializedName("level")
-    val level: Int,
+    @SerializedName("floor_number")
+    val floorNumber: Int,
     
-    @SerializedName("description")
-    val description: String? = null,
+    @SerializedName("created_at")
+    val createdAt: String? = null,
     
-    @SerializedName("floorPlanUrl")
-    val floorPlanUrl: String? = null,
+    @SerializedName("updated_at")
+    val updatedAt: String? = null,
     
     @SerializedName("pois")
     val pois: List<POI>? = null,

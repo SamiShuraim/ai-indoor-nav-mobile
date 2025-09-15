@@ -11,7 +11,7 @@ import com.KFUPM.ai_indoor_nav_mobile.models.Floor
 
 class FloorSelectorAdapter(
     private var floors: List<Floor>,
-    private var selectedFloorId: String? = null,
+    private var selectedFloorId: Int? = null,
     private val onFloorSelected: (Floor) -> Unit
 ) : RecyclerView.Adapter<FloorSelectorAdapter.FloorViewHolder>() {
 
@@ -51,13 +51,13 @@ class FloorSelectorAdapter(
 
     override fun getItemCount(): Int = floors.size
 
-    fun updateFloors(newFloors: List<Floor>, selectedId: String? = null) {
+    fun updateFloors(newFloors: List<Floor>, selectedId: Int? = null) {
         floors = newFloors
         selectedFloorId = selectedId
         notifyDataSetChanged()
     }
     
-    fun setSelectedFloor(floorId: String) {
+    fun setSelectedFloor(floorId: Int) {
         selectedFloorId = floorId
         notifyDataSetChanged()
     }

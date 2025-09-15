@@ -4,32 +4,33 @@ import com.google.gson.annotations.SerializedName
 
 data class RouteNode(
     @SerializedName("id")
-    val id: String,
+    val id: Int,
     
-    @SerializedName("name")
-    val name: String? = null,
+    @SerializedName("floor_id")
+    val floorId: Int,
     
-    @SerializedName("floorId")
-    val floorId: String,
+    @SerializedName("connected_node_ids")
+    val connectedNodeIds: List<Int>? = null,
     
-    @SerializedName("x")
-    val x: Double,
+    @SerializedName("geometry")
+    val geometry: Any? = null, // PostGIS Point geometry
     
-    @SerializedName("y")
-    val y: Double,
+    @SerializedName("is_visible")
+    val isVisible: Boolean = true,
     
-    @SerializedName("latitude")
-    val latitude: Double? = null,
+    @SerializedName("created_at")
+    val createdAt: String? = null,
     
-    @SerializedName("longitude")
-    val longitude: Double? = null,
-    
-    @SerializedName("nodeType")
-    val nodeType: String? = null,
-    
-    @SerializedName("isAccessible")
-    val isAccessible: Boolean = true,
-    
-    @SerializedName("connectedNodes")
-    val connectedNodes: List<String>? = null
-)
+    @SerializedName("updated_at")
+    val updatedAt: String? = null
+) {
+    // Computed properties for backward compatibility
+    val name: String? get() = "Node $id"
+    val x: Double get() = 0.0 // Will be extracted from geometry
+    val y: Double get() = 0.0 // Will be extracted from geometry
+    val latitude: Double? get() = null // Will be extracted from geometry
+    val longitude: Double? get() = null // Will be extracted from geometry
+    val nodeType: String? get() = null
+    val isAccessible: Boolean get() = isVisible
+    val connectedNodes: List<String>? get() = connectedNodeIds?.map { it.toString() }
+}

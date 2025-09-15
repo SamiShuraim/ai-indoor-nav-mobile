@@ -4,7 +4,7 @@ import com.google.gson.annotations.SerializedName
 
 data class Building(
     @SerializedName("id")
-    val id: String,
+    val id: Int,
     
     @SerializedName("name")
     val name: String,
@@ -12,14 +12,11 @@ data class Building(
     @SerializedName("description")
     val description: String? = null,
     
-    @SerializedName("address")
-    val address: String? = null,
+    @SerializedName("created_at")
+    val createdAt: String? = null,
     
-    @SerializedName("latitude")
-    val latitude: Double? = null,
-    
-    @SerializedName("longitude")
-    val longitude: Double? = null,
+    @SerializedName("updated_at")
+    val updatedAt: String? = null,
     
     @SerializedName("floors")
     val floors: List<Floor>? = null
