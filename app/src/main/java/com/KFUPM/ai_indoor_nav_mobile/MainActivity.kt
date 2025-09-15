@@ -1,12 +1,14 @@
 package com.KFUPM.ai_indoor_nav_mobile
 
 import android.Manifest
+import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
 import android.view.View
 import android.widget.LinearLayout
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -28,6 +30,7 @@ import org.maplibre.android.style.layers.*
 import org.maplibre.android.style.layers.PropertyFactory.*
 import org.maplibre.android.utils.ColorUtils
 import org.maplibre.geojson.*
+import org.maplibre.android.style.expressions.Expression.*
 import kotlinx.coroutines.*
 import okhttp3.*
 import org.maplibre.android.WellKnownTileServer
@@ -40,6 +43,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var mapLibreMap: MapLibreMap
     private lateinit var fabBluetooth: FloatingActionButton
     private lateinit var fabSearch: FloatingActionButton
+    private lateinit var fabClearPath: FloatingActionButton
     private lateinit var floorSelectorContainer: LinearLayout
     private lateinit var floorRecyclerView: RecyclerView
     private lateinit var floorSelectorAdapter: FloorSelectorAdapter
@@ -63,6 +67,11 @@ class MainActivity : AppCompatActivity() {
     private val beaconLayerId = "beacon-layer"
     private val routeNodeLayerId = "route-node-layer"
     
+    // Path visualization IDs
+    private val pathSourceId = "path-source"
+    private val pathNodesLayerId = "path-nodes-layer"
+    private val pathEdgesLayerId = "path-edges-layer"
+    
     companion object {
         private const val TAG = "MainActivity"
     }
@@ -73,6 +82,18 @@ class MainActivity : AppCompatActivity() {
                 enableUserLocation()
             } else {
                 // TODO: Handle permission denied (optional)
+            }
+        }
+
+    private val poiSearchLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == Activity.RESULT_OK) {
+                val poiId = result.data?.getIntExtra("poi_id", -1) ?: -1
+                val poiName = result.data?.getStringExtra("poi_name") ?: "Unknown POI"
+                
+                if (poiId != -1) {
+                    handleNavigationToPOI(poiId, poiName)
+                }
             }
         }
 
@@ -91,6 +112,7 @@ class MainActivity : AppCompatActivity() {
         mapView = findViewById(R.id.mapView)
         fabBluetooth = findViewById(R.id.fabBluetooth)
         fabSearch = findViewById(R.id.fabSearch)
+        fabClearPath = findViewById(R.id.fabClearPath)
         floorSelectorContainer = findViewById(R.id.floorSelectorContainer)
         floorRecyclerView = findViewById(R.id.floorRecyclerView)
         
@@ -127,7 +149,11 @@ class MainActivity : AppCompatActivity() {
         
         fabSearch.setOnClickListener {
             val intent = Intent(this, POISearchActivity::class.java)
-            startActivity(intent)
+            poiSearchLauncher.launch(intent)
+        }
+        
+        fabClearPath.setOnClickListener {
+            clearCurrentPath()
         }
     }
 
@@ -1155,6 +1181,154 @@ class MainActivity : AppCompatActivity() {
             Log.e(TAG, "Error fitting map to features", e)
         }
     }
+
+    /**
+     * Handle navigation request to a specific POI
+     */
+    private fun handleNavigationToPOI(poiId: Int, poiName: String) {
+        Log.d(TAG, "Starting navigation to POI: $poiName (ID: $poiId)")
+        
+        // Get user's current location
+        val locationComponent = mapLibreMap.locationComponent
+        val currentLocation = locationComponent.lastKnownLocation
+        
+        if (currentLocation == null) {
+            Toast.makeText(this, "Unable to get current location. Please enable location services.", Toast.LENGTH_LONG).show()
+            return
+        }
+        
+        // Create user location object
+        val userLocation = UserLocation(currentLocation.latitude, currentLocation.longitude)
+        
+        // Request path from API
+        lifecycleScope.launch {
+            try {
+                Toast.makeText(this@MainActivity, "Finding path to $poiName...", Toast.LENGTH_SHORT).show()
+                
+                val pathGeoJson = apiService.findPath(userLocation, poiId)
+                
+                if (pathGeoJson != null) {
+                    Log.d(TAG, "Received path data: $pathGeoJson")
+                    displayPath(pathGeoJson)
+                    Toast.makeText(this@MainActivity, "Path found to $poiName", Toast.LENGTH_SHORT).show()
+                } else {
+                    Log.e(TAG, "Failed to get path from API")
+                    Toast.makeText(this@MainActivity, "Failed to find path to $poiName", Toast.LENGTH_LONG).show()
+                }
+                
+            } catch (e: Exception) {
+                Log.e(TAG, "Error during navigation request", e)
+                Toast.makeText(this@MainActivity, "Error finding path: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+    
+    /**
+     * Display the path on the map
+     */
+    private fun displayPath(pathGeoJson: String) {
+        try {
+            val style = mapLibreMap.style
+            if (style == null) {
+                Log.w(TAG, "Map style not ready for path display")
+                return
+            }
+            
+            // Clear any existing path
+            clearPath(style)
+            
+            // Parse the GeoJSON response
+            val featureCollection = parseGeoJSONToFeatureCollection(pathGeoJson)
+            if (featureCollection == null) {
+                Log.e(TAG, "Failed to parse path GeoJSON")
+                return
+            }
+            
+            // Add path source
+            val pathSource = GeoJsonSource(pathSourceId, featureCollection)
+            style.addSource(pathSource)
+            
+            // Add path nodes layer (blue circles)
+            val pathNodesLayer = CircleLayer(pathNodesLayerId, pathSourceId)
+                .withProperties(
+                    circleColor("#0080FF"), // Blue color for path nodes
+                    circleRadius(8f),
+                    circleStrokeColor("#FFFFFF"),
+                    circleStrokeWidth(2f)
+                )
+                .withFilter(eq(get("is_path_node"), literal(true)))
+            style.addLayer(pathNodesLayer)
+            
+            // Add path edges layer (blue lines)
+            val pathEdgesLayer = LineLayer(pathEdgesLayerId, pathSourceId)
+                .withProperties(
+                    lineColor("#0080FF"), // Blue color for path edges
+                    lineWidth(6f),
+                    lineOpacity(0.8f)
+                )
+                .withFilter(eq(get("is_path_edge"), literal(true)))
+            style.addLayer(pathEdgesLayer)
+            
+            Log.d(TAG, "Path displayed successfully")
+            
+            // Show the clear path button
+            fabClearPath.visibility = View.VISIBLE
+            
+            // TODO: Fit the map to show the entire path
+            // fitMapToPath(featureCollection)
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error displaying path", e)
+            Toast.makeText(this, "Error displaying path", Toast.LENGTH_SHORT).show()
+        }
+    }
+    
+    /**
+     * Clear existing path from the map
+     */
+    private fun clearPath(style: Style) {
+        try {
+            // Remove layers
+            style.getLayer(pathNodesLayerId)?.let { style.removeLayer(it) }
+            style.getLayer(pathEdgesLayerId)?.let { style.removeLayer(it) }
+            
+            // Remove source
+            style.getSource(pathSourceId)?.let { style.removeSource(pathSourceId) }
+            
+            Log.d(TAG, "Cleared existing path")
+            
+            // Hide the clear path button when path is cleared
+            fabClearPath.visibility = View.GONE
+        } catch (e: Exception) {
+            Log.w(TAG, "Error clearing path", e)
+        }
+    }
+    
+    /**
+     * Clear the current navigation path
+     */
+    private fun clearCurrentPath() {
+        try {
+            val style = mapLibreMap.style
+            if (style != null) {
+                clearPath(style)
+                fabClearPath.visibility = View.GONE
+                Toast.makeText(this, "Path cleared", Toast.LENGTH_SHORT).show()
+                Log.d(TAG, "Navigation path cleared by user")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error clearing current path", e)
+            Toast.makeText(this, "Error clearing path", Toast.LENGTH_SHORT).show()
+        }
+    }
+    
+    // TODO: Implement path fitting when coordinate access is resolved
+    // /**
+    //  * Fit the map to show the entire path
+    //  */
+    // private fun fitMapToPath(pathFeatureCollection: FeatureCollection) {
+    //     // Implementation removed due to coordinate access issues
+    // }
 
     override fun onStart() { super.onStart(); mapView.onStart() }
     override fun onResume() { super.onResume(); mapView.onResume() }

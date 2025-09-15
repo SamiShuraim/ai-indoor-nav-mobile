@@ -8,6 +8,8 @@ import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.*
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 
 class ApiService {
@@ -279,6 +281,39 @@ class ApiService {
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error fetching route node GeoJSON", e)
+                null
+            }
+        }
+    }
+    
+    /**
+     * Find path from user location to POI
+     */
+    suspend fun findPath(userLocation: UserLocation, destinationPoiId: Int): String? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val pathRequest = PathRequest(userLocation, destinationPoiId)
+                val requestBody = gson.toJson(pathRequest)
+                
+                val request = Request.Builder()
+                    .url("${ApiConstants.API_BASE_URL}${ApiConstants.Endpoints.FIND_PATH}")
+                    .post(requestBody.toRequestBody("application/json".toMediaType()))
+                    .build()
+                
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val jsonString = response.body?.string()
+                        if (jsonString != null) {
+                            Log.d(TAG, "Path response: $jsonString")
+                            jsonString
+                        } else null
+                    } else {
+                        Log.e(TAG, "Failed to find path: ${response.code} - ${response.body?.string()}")
+                        null
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error finding path", e)
                 null
             }
         }
