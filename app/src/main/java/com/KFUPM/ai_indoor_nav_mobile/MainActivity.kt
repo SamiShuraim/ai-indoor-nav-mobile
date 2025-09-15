@@ -368,9 +368,10 @@ class MainActivity : AppCompatActivity() {
                 val source = GeoJsonSource(sourceId, featureCollection)
                 style.addSource(source)
                 
-                // Add fill layer
+                // Add fill layer with 0.6 opacity
                 val fillLayer = FillLayer(fillLayerId, sourceId).withProperties(
-                    fillColor(color.replace("#", "#80")) // Add transparency
+                    fillColor(color),
+                    fillOpacity(0.6f)
                 )
                 style.addLayer(fillLayer)
                 
@@ -886,9 +887,10 @@ class MainActivity : AppCompatActivity() {
             val geoJsonSource = GeoJsonSource("poi-source", featureCollection)
             style.addSource(geoJsonSource)
             
-            // Add fill layer for polygon interiors
+            // Add fill layer for polygon interiors with 0.6 opacity
             val fillLayer = FillLayer("poi-fill-layer", "poi-source").withProperties(
-                fillColor("#80FF0000") // red
+                fillColor("#FF0000"), // red
+                fillOpacity(0.6f)
             )
             style.addLayer(fillLayer)
             
