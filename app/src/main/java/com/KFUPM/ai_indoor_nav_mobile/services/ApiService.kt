@@ -30,12 +30,12 @@ class ApiService {
                 
                 client.newCall(request).execute().use { response ->
                     if (response.isSuccessful) {
-                        val jsonString = response.body?.string()
-                        if (jsonString != null) {
+                        val jsonString = response.body.string()
+                        run {
                             Log.d(TAG, "Buildings response: $jsonString")
                             val type = object : TypeToken<List<Building>>() {}.type
                             gson.fromJson<List<Building>>(jsonString, type)
-                        } else null
+                        }
                     } else {
                         Log.e(TAG, "Failed to fetch buildings: ${response.code}")
                         null

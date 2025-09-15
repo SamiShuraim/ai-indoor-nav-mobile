@@ -16,7 +16,7 @@ class POISearchActivity : AppCompatActivity() {
     private lateinit var recyclerView: RecyclerView
     private lateinit var adapter: POIAdapter
     private val client = OkHttpClient()
-    private val apiUrl = "http://192.168.239.223:5090/api/poi"
+    private val apiUrl = "http://192.168.128.223:5090/api/poi"
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
