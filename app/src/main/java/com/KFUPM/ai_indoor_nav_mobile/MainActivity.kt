@@ -172,10 +172,25 @@ class MainActivity : AppCompatActivity() {
     private fun initializeAppData() {
         lifecycleScope.launch {
             try {
-                Log.d(TAG, "Starting with legacy POI approach to avoid crashes...")
-                fetchLegacyPOIs()
+                Log.d(TAG, "Fetching buildings...")
+                val buildings = apiService.getBuildings()
+                
+                if (buildings.isNullOrEmpty()) {
+                    Log.w(TAG, "No buildings found, trying legacy POI endpoint...")
+                    fetchLegacyPOIs()
+                    return@launch
+                }
+                
+                // Select the first building
+                currentBuilding = buildings.first()
+                Log.d(TAG, "Selected building: ${currentBuilding?.name}")
+                
+                // Fetch floors for the selected building
+                fetchFloorsForBuilding(currentBuilding!!.id)
+                
             } catch (e: Exception) {
-                Log.e(TAG, "Error initializing app data", e)
+                Log.e(TAG, "Error initializing app data, trying legacy approach", e)
+                fetchLegacyPOIs()
             }
         }
     }
@@ -227,39 +242,263 @@ class MainActivity : AppCompatActivity() {
         
         lifecycleScope.launch {
             try {
-                Log.d(TAG, "Loading data for floor: ${floor.name}")
+                Log.d(TAG, "Loading GeoJSON data for floor: ${floor.name}")
                 
-                // Fetch all data for the floor in parallel
-                val poisDeferred = async { apiService.getPOIsByFloor(floor.id) }
-                val beaconsDeferred = async { apiService.getBeaconsByFloor(floor.id) }
-                val routeNodesDeferred = async { apiService.getRouteNodesByFloor(floor.id) }
+                // Fetch all GeoJSON data for the floor in parallel
+                val poisDeferred = async { apiService.getPOIsByFloorAsGeoJSON(floor.id) }
+                val beaconsDeferred = async { apiService.getBeaconsByFloorAsGeoJSON(floor.id) }
+                val routeNodesDeferred = async { apiService.getRouteNodesByFloorAsGeoJSON(floor.id) }
                 
-                currentPOIs = poisDeferred.await() ?: emptyList()
-                currentBeacons = beaconsDeferred.await() ?: emptyList()
-                currentRouteNodes = routeNodesDeferred.await() ?: emptyList()
+                val poisGeoJSON = poisDeferred.await()
+                val beaconsGeoJSON = beaconsDeferred.await()
+                val routeNodesGeoJSON = routeNodesDeferred.await()
                 
-                Log.d(TAG, "Loaded ${currentPOIs.size} POIs, ${currentBeacons.size} beacons, ${currentRouteNodes.size} route nodes")
+                Log.d(TAG, "Loaded GeoJSON data for floor ${floor.name}")
                 
-                // Debug coordinate information
-                currentPOIs.forEach { poi ->
-                    Log.d(TAG, "POI ${poi.name}: x=${poi.x}, y=${poi.y}, lat=${poi.latitude}, lng=${poi.longitude}")
-                }
-                currentBeacons.take(3).forEach { beacon -> // Only log first 3 to avoid spam
-                    Log.d(TAG, "Beacon ${beacon.name}: x=${beacon.x}, y=${beacon.y}, lat=${beacon.latitude}, lng=${beacon.longitude}")
-                }
-                currentRouteNodes.take(3).forEach { node ->
-                    Log.d(TAG, "Route node ${node.name}: x=${node.x}, y=${node.y}, lat=${node.latitude}, lng=${node.longitude}")
-                }
-                
-                // Update map display
-                updateMapDisplay()
-                
-                // Fit map to show all features
-                fitMapToFeatures()
+                // Update map display with all data
+                updateMapDisplayWithGeoJSON(poisGeoJSON, beaconsGeoJSON, routeNodesGeoJSON)
                 
             } catch (e: Exception) {
                 Log.e(TAG, "Error loading floor data", e)
             }
+        }
+    }
+
+    /**
+     * Update map display with GeoJSON data for POIs, beacons, and route nodes
+     */
+    private fun updateMapDisplayWithGeoJSON(poisGeoJSON: String?, beaconsGeoJSON: String?, routeNodesGeoJSON: String?) {
+        val style = mapLibreMap.style
+        if (style == null || !style.isFullyLoaded) {
+            Log.w(TAG, "Map style not ready for GeoJSON display")
+            return
+        }
+        
+        try {
+            Log.d(TAG, "Updating map display with GeoJSON data...")
+            
+            // Clear all existing layers and sources
+            clearAllMapLayers(style)
+            
+            val allFeatures = mutableListOf<Feature>()
+            
+            // Add POIs (red)
+            if (!poisGeoJSON.isNullOrBlank()) {
+                addGeoJSONLayer(style, poisGeoJSON, "poi", "#FF0000", 2f, allFeatures)
+            }
+            
+            // Add beacons (orange circles)
+            if (!beaconsGeoJSON.isNullOrBlank()) {
+                addGeoJSONCircleLayer(style, beaconsGeoJSON, "beacon", "#FFA500", 8f, allFeatures)
+            }
+            
+            // Add route nodes (small blue circles)
+            if (!routeNodesGeoJSON.isNullOrBlank()) {
+                addGeoJSONCircleLayer(style, routeNodesGeoJSON, "route-node", "#0066FF", 3f, allFeatures)
+            }
+            
+            // Fit map to show all features
+            if (allFeatures.isNotEmpty()) {
+                fitMapToFeatureList(allFeatures)
+            }
+            
+            Log.d(TAG, "Map display update completed with ${allFeatures.size} total features")
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error updating map display with GeoJSON", e)
+        }
+    }
+
+    /**
+     * Clear all map layers and sources
+     */
+    private fun clearAllMapLayers(style: Style) {
+        try {
+            // Remove all layers
+            val layerIds = listOf(
+                "poi-fill-layer", "poi-stroke-layer",
+                "beacon-layer", "route-node-layer",
+                poiFillLayerId, poiStrokeLayerId, beaconLayerId, routeNodeLayerId
+            )
+            
+            layerIds.forEach { layerId ->
+                try {
+                    if (style.getLayer(layerId) != null) {
+                        style.removeLayer(layerId)
+                        Log.d(TAG, "Removed layer: $layerId")
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to remove layer $layerId", e)
+                }
+            }
+            
+            // Remove all sources
+            val sourceIds = listOf(
+                "poi-source", "beacon-source", "route-node-source",
+                poiSourceId, beaconSourceId, routeNodeSourceId
+            )
+            
+            sourceIds.forEach { sourceId ->
+                try {
+                    if (style.getSource(sourceId) != null) {
+                        style.removeSource(sourceId)
+                        Log.d(TAG, "Removed source: $sourceId")
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to remove source $sourceId", e)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error clearing all map layers", e)
+        }
+    }
+
+    /**
+     * Add GeoJSON layer for polygons/lines (POIs)
+     */
+    private fun addGeoJSONLayer(style: Style, geoJsonString: String, layerPrefix: String, color: String, lineWidth: Float, allFeatures: MutableList<Feature>) {
+        try {
+            val featureCollection = parseGeoJSONToFeatureCollection(geoJsonString)
+            if (featureCollection != null) {
+                val sourceId = "$layerPrefix-source"
+                val fillLayerId = "$layerPrefix-fill-layer"
+                val strokeLayerId = "$layerPrefix-stroke-layer"
+                
+                // Add source
+                val source = GeoJsonSource(sourceId, featureCollection)
+                style.addSource(source)
+                
+                // Add fill layer
+                val fillLayer = FillLayer(fillLayerId, sourceId).withProperties(
+                    fillColor(color.replace("#", "#80")) // Add transparency
+                )
+                style.addLayer(fillLayer)
+                
+                // Add stroke layer
+                val strokeLayer = LineLayer(strokeLayerId, sourceId).withProperties(
+                    lineColor(color),
+                    lineWidth(lineWidth)
+                )
+                style.addLayer(strokeLayer)
+                
+                // Add features to the list for fitting
+                featureCollection.features()?.let { allFeatures.addAll(it) }
+                
+                val featureCount = featureCollection.features()?.size ?: 0
+                Log.d(TAG, "Added $featureCount $layerPrefix features")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error adding $layerPrefix layer", e)
+        }
+    }
+
+    /**
+     * Add GeoJSON circle layer for points (beacons, route nodes)
+     */
+    private fun addGeoJSONCircleLayer(style: Style, geoJsonString: String, layerPrefix: String, color: String, radius: Float, allFeatures: MutableList<Feature>) {
+        try {
+            val featureCollection = parseGeoJSONToFeatureCollection(geoJsonString)
+            if (featureCollection != null) {
+                val sourceId = "$layerPrefix-source"
+                val layerId = "$layerPrefix-layer"
+                
+                // Add source
+                val source = GeoJsonSource(sourceId, featureCollection)
+                style.addSource(source)
+                
+                // Add circle layer
+                val circleLayer = CircleLayer(layerId, sourceId).withProperties(
+                    circleRadius(radius),
+                    circleColor(color),
+                    circleStrokeWidth(1f),
+                    circleStrokeColor(color.replace("#", "#CC")) // Darker stroke
+                )
+                style.addLayer(circleLayer)
+                
+                // Add features to the list for fitting
+                featureCollection.features()?.let { allFeatures.addAll(it) }
+                
+                val featureCount = featureCollection.features()?.size ?: 0
+                Log.d(TAG, "Added $featureCount $layerPrefix features")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error adding $layerPrefix circle layer", e)
+        }
+    }
+
+    /**
+     * Parse GeoJSON string to FeatureCollection
+     */
+    private fun parseGeoJSONToFeatureCollection(geoJsonString: String): FeatureCollection? {
+        return try {
+            when {
+                geoJsonString.trim().startsWith("[") -> {
+                    // Array of features
+                    val featureCollectionJson = """{"type": "FeatureCollection", "features": $geoJsonString}"""
+                    FeatureCollection.fromJson(featureCollectionJson)
+                }
+                geoJsonString.contains("\"FeatureCollection\"") -> {
+                    // Already a FeatureCollection
+                    FeatureCollection.fromJson(geoJsonString)
+                }
+                geoJsonString.contains("\"Feature\"") -> {
+                    // Single feature
+                    val feature = Feature.fromJson(geoJsonString)
+                    FeatureCollection.fromFeature(feature)
+                }
+                else -> {
+                    Log.w(TAG, "Unknown GeoJSON format")
+                    null
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing GeoJSON: $geoJsonString", e)
+            null
+        }
+    }
+
+    /**
+     * Fit map to a list of features
+     */
+    private fun fitMapToFeatureList(features: List<Feature>) {
+        try {
+            if (features.isEmpty()) return
+            
+            val coordinates = mutableListOf<org.maplibre.android.geometry.LatLng>()
+            
+            features.forEach { feature ->
+                val geometry = feature.geometry()
+                when (geometry) {
+                    is Point -> {
+                        coordinates.add(org.maplibre.android.geometry.LatLng(geometry.latitude(), geometry.longitude()))
+                    }
+                    is org.maplibre.geojson.Polygon -> {
+                        // For polygons, add all coordinates from the first ring
+                        val rings = geometry.coordinates()
+                        if (rings.isNotEmpty() && rings[0].isNotEmpty()) {
+                            rings[0].forEach { point ->
+                                coordinates.add(org.maplibre.android.geometry.LatLng(point.latitude(), point.longitude()))
+                            }
+                        }
+                    }
+                }
+            }
+            
+            if (coordinates.isNotEmpty()) {
+                val bounds = org.maplibre.android.geometry.LatLngBounds.Builder()
+                coordinates.forEach { bounds.include(it) }
+                
+                val padding = 100
+                mapLibreMap.animateCamera(
+                    CameraUpdateFactory.newLatLngBounds(bounds.build(), padding),
+                    1000
+                )
+                
+                Log.d(TAG, "Fitted map to ${coordinates.size} feature coordinates")
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error fitting map to feature list", e)
         }
     }
 

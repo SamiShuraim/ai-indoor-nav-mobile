@@ -197,6 +197,93 @@ class ApiService {
         }
     }
     
+    /**
+     * Fetch POIs for a specific floor as GeoJSON
+     */
+    suspend fun getPOIsByFloorAsGeoJSON(floorId: Int): String? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val request = Request.Builder()
+                    .url("${ApiConstants.API_BASE_URL}${ApiConstants.Endpoints.poisByFloor(floorId)}")
+                    .build()
+                
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val jsonString = response.body?.string()
+                        if (jsonString != null) {
+                            Log.d(TAG, "Floor POI GeoJSON response: $jsonString")
+                            jsonString
+                        } else null
+                    } else {
+                        Log.e(TAG, "Failed to fetch floor POI GeoJSON: ${response.code}")
+                        null
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error fetching floor POI GeoJSON", e)
+                null
+            }
+        }
+    }
+    
+    /**
+     * Fetch beacons for a specific floor as GeoJSON
+     */
+    suspend fun getBeaconsByFloorAsGeoJSON(floorId: Int): String? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val request = Request.Builder()
+                    .url("${ApiConstants.API_BASE_URL}${ApiConstants.Endpoints.beaconsByFloor(floorId)}")
+                    .build()
+                
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val jsonString = response.body?.string()
+                        if (jsonString != null) {
+                            Log.d(TAG, "Beacon GeoJSON response: $jsonString")
+                            jsonString
+                        } else null
+                    } else {
+                        Log.e(TAG, "Failed to fetch beacon GeoJSON: ${response.code}")
+                        null
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error fetching beacon GeoJSON", e)
+                null
+            }
+        }
+    }
+    
+    /**
+     * Fetch route nodes for a specific floor as GeoJSON
+     */
+    suspend fun getRouteNodesByFloorAsGeoJSON(floorId: Int): String? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val request = Request.Builder()
+                    .url("${ApiConstants.API_BASE_URL}${ApiConstants.Endpoints.routeNodesByFloor(floorId)}")
+                    .build()
+                
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val jsonString = response.body?.string()
+                        if (jsonString != null) {
+                            Log.d(TAG, "Route node GeoJSON response: $jsonString")
+                            jsonString
+                        } else null
+                    } else {
+                        Log.e(TAG, "Failed to fetch route node GeoJSON: ${response.code}")
+                        null
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error fetching route node GeoJSON", e)
+                null
+            }
+        }
+    }
+    
     fun cleanup() {
         client.dispatcher.executorService.shutdown()
     }
