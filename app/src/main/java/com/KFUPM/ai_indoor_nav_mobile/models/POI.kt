@@ -1,6 +1,7 @@
 package com.KFUPM.ai_indoor_nav_mobile.models
 
 import com.google.gson.annotations.SerializedName
+import com.KFUPM.ai_indoor_nav_mobile.utils.GeometryUtils
 
 data class POI(
     @SerializedName("id")
@@ -40,10 +41,14 @@ data class POI(
     val category: POICategory? = null
 ) {
     // Computed properties for backward compatibility
-    val x: Double get() = 0.0 // Will be extracted from geometry
-    val y: Double get() = 0.0 // Will be extracted from geometry
-    val latitude: Double? get() = null // Will be extracted from geometry
-    val longitude: Double? get() = null // Will be extracted from geometry
+    private val coordinates: Pair<Double, Double>? by lazy {
+        GeometryUtils.extractCoordinatesFromGeometry(geometry)
+    }
+    
+    val x: Double get() = coordinates?.first ?: 0.0
+    val y: Double get() = coordinates?.second ?: 0.0
+    val latitude: Double? get() = coordinates?.second
+    val longitude: Double? get() = coordinates?.first
 }
 
 data class POICategory(
