@@ -169,9 +169,9 @@ class ApiService {
     }
     
     /**
-     * Fetch all POIs (legacy support for existing endpoint)
+     * Fetch all POIs as raw GeoJSON string
      */
-    suspend fun getAllPOIs(): List<POI>? {
+    suspend fun getAllPOIsAsGeoJSON(): String? {
         return withContext(Dispatchers.IO) {
             try {
                 val request = Request.Builder()
@@ -182,24 +182,16 @@ class ApiService {
                     if (response.isSuccessful) {
                         val jsonString = response.body?.string()
                         if (jsonString != null) {
-                            Log.d(TAG, "All POIs response: $jsonString")
-                            // Handle both array and FeatureCollection formats
-                            if (jsonString.trim().startsWith("[")) {
-                                val type = object : TypeToken<List<POI>>() {}.type
-                                gson.fromJson<List<POI>>(jsonString, type)
-                            } else {
-                                // Handle FeatureCollection format if needed
-                                val type = object : TypeToken<List<POI>>() {}.type
-                                gson.fromJson<List<POI>>(jsonString, type)
-                            }
+                            Log.d(TAG, "POI GeoJSON response: $jsonString")
+                            jsonString
                         } else null
                     } else {
-                        Log.e(TAG, "Failed to fetch all POIs: ${response.code}")
+                        Log.e(TAG, "Failed to fetch POI GeoJSON: ${response.code}")
                         null
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error fetching all POIs", e)
+                Log.e(TAG, "Error fetching POI GeoJSON", e)
                 null
             }
         }

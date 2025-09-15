@@ -589,27 +589,132 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             try {
                 Log.d(TAG, "Fetching POIs using legacy endpoint...")
-                val pois = apiService.getAllPOIs()
+                val geoJsonString = apiService.getAllPOIsAsGeoJSON()
                 
-                if (pois.isNullOrEmpty()) {
-                    Log.w(TAG, "No POIs found in legacy endpoint")
+                if (geoJsonString.isNullOrBlank()) {
+                    Log.w(TAG, "No POI GeoJSON data received")
                     return@launch
                 }
                 
-                currentPOIs = pois
-                Log.d(TAG, "Loaded ${currentPOIs.size} POIs from legacy endpoint")
+                Log.d(TAG, "Received GeoJSON: $geoJsonString")
                 
-                // Debug coordinate information
-                currentPOIs.take(5).forEach { poi ->
-                    Log.d(TAG, "POI ${poi.name}: x=${poi.x}, y=${poi.y}, lat=${poi.latitude}, lng=${poi.longitude}")
-                }
-                
-                // Display using simple approach
-                displayLegacyPOIs()
+                // Display GeoJSON directly
+                displayGeoJSONPOIs(geoJsonString)
                 
             } catch (e: Exception) {
                 Log.e(TAG, "Error fetching legacy POIs", e)
             }
+        }
+    }
+
+    /**
+     * Display GeoJSON POIs directly
+     */
+    private fun displayGeoJSONPOIs(geoJsonString: String) {
+        val style = mapLibreMap.style
+        if (style == null || !style.isFullyLoaded) {
+            Log.w(TAG, "Map style not ready for GeoJSON POI display")
+            return
+        }
+        
+        try {
+            Log.d(TAG, "Displaying GeoJSON POIs...")
+            
+            // Remove existing layers first
+            try {
+                style.getLayer("poi-fill-layer")?.let { style.removeLayer("poi-fill-layer") }
+                style.getLayer("poi-stroke-layer")?.let { style.removeLayer("poi-stroke-layer") }
+                style.getSource("poi-source")?.let { style.removeSource("poi-source") }
+            } catch (e: Exception) {
+                Log.w(TAG, "Error removing existing layers", e)
+            }
+            
+            // Parse GeoJSON
+            val featureCollection = if (geoJsonString.trim().startsWith("[")) {
+                // Array of features - convert to FeatureCollection
+                val featureCollectionJson = """{"type": "FeatureCollection", "features": $geoJsonString}"""
+                FeatureCollection.fromJson(featureCollectionJson)
+            } else if (geoJsonString.contains("\"type\"") && geoJsonString.contains("\"FeatureCollection\"")) {
+                // Already a FeatureCollection
+                FeatureCollection.fromJson(geoJsonString)
+            } else {
+                // Single feature - wrap in FeatureCollection
+                val feature = Feature.fromJson(geoJsonString)
+                FeatureCollection.fromFeature(feature)
+            }
+            
+            // Add GeoJSON source
+            val geoJsonSource = GeoJsonSource("poi-source", featureCollection)
+            style.addSource(geoJsonSource)
+            
+            // Add fill layer for polygon interiors
+            val fillLayer = FillLayer("poi-fill-layer", "poi-source").withProperties(
+                fillColor("#80FF0000") // red
+            )
+            style.addLayer(fillLayer)
+            
+            // Add line layer for polygon outlines
+            val strokeLayer = LineLayer("poi-stroke-layer", "poi-source").withProperties(
+                lineColor("#FF0000"), // Red outline
+                lineWidth(2f)
+            )
+            style.addLayer(strokeLayer)
+            
+            val featureCount = featureCollection.features()?.size ?: 0
+            Log.d(TAG, "Successfully added $featureCount GeoJSON POI features to map")
+            
+            // Fit map to show features
+            if (featureCount > 0) {
+                fitMapToGeoJSONFeatures(featureCollection)
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error displaying GeoJSON POIs", e)
+        }
+    }
+
+    /**
+     * Fit map to GeoJSON features
+     */
+    private fun fitMapToGeoJSONFeatures(featureCollection: FeatureCollection) {
+        try {
+            val features = featureCollection.features()
+            if (features.isNullOrEmpty()) return
+            
+            val coordinates = mutableListOf<org.maplibre.android.geometry.LatLng>()
+            
+            features.forEach { feature ->
+                val geometry = feature.geometry()
+                when (geometry) {
+                    is Point -> {
+                        coordinates.add(org.maplibre.android.geometry.LatLng(geometry.latitude(), geometry.longitude()))
+                    }
+                    is org.maplibre.geojson.Polygon -> {
+                        // For polygons, use the first coordinate of the first ring
+                        val rings = geometry.coordinates()
+                        if (rings.isNotEmpty() && rings[0].isNotEmpty()) {
+                            val firstPoint = rings[0][0]
+                            coordinates.add(org.maplibre.android.geometry.LatLng(firstPoint.latitude(), firstPoint.longitude()))
+                        }
+                    }
+                }
+            }
+            
+            if (coordinates.isNotEmpty()) {
+                val bounds = org.maplibre.android.geometry.LatLngBounds.Builder()
+                coordinates.forEach { bounds.include(it) }
+                
+                val padding = 100
+                mapLibreMap.animateCamera(
+                    CameraUpdateFactory.newLatLngBounds(bounds.build(), padding),
+                    1000
+                )
+                
+                Log.d(TAG, "Fitted map to ${coordinates.size} GeoJSON coordinates")
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error fitting map to GeoJSON features", e)
         }
     }
 
@@ -630,14 +735,25 @@ class MainActivity : AppCompatActivity() {
             
             currentPOIs.forEach { poi ->
                 try {
-                    if (poi.geometry != null) {
-                        val feature = Feature.fromJson(poi.geometry.toString())
-                        feature.addStringProperty("name", poi.name ?: "Unknown POI")
-                        feature.addStringProperty("id", poi.id?.toString() ?: "unknown")
+                    if (poi.geometry != null && poi.type == "Feature") {
+                        // POI is already a complete GeoJSON feature, use it directly
+                        val poiJson = """
+                        {
+                            "type": "${poi.type}",
+                            "properties": ${if (poi.properties != null) com.google.gson.Gson().toJson(poi.properties) else "{}"},
+                            "geometry": ${com.google.gson.Gson().toJson(poi.geometry)}
+                        }
+                        """.trimIndent()
+                        
+                        val feature = Feature.fromJson(poiJson)
                         features.add(feature)
+                        
+                        Log.d(TAG, "Added GeoJSON feature for POI: ${poi.name}")
+                    } else {
+                        Log.w(TAG, "POI ${poi.id} is not a valid GeoJSON feature")
                     }
                 } catch (e: Exception) {
-                    Log.w(TAG, "Failed to create legacy feature for POI ${poi.id}", e)
+                    Log.w(TAG, "Failed to create feature for POI ${poi.id}: ${e.message}", e)
                 }
             }
             

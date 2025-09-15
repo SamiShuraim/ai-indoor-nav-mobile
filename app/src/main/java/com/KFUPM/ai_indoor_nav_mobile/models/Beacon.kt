@@ -1,13 +1,55 @@
 package com.KFUPM.ai_indoor_nav_mobile.models
 
 import com.google.gson.annotations.SerializedName
+import com.KFUPM.ai_indoor_nav_mobile.utils.GeometryUtils
 
 data class Beacon(
+    @SerializedName("type")
+    val type: String = "Feature",
+    
+    @SerializedName("properties")
+    val properties: BeaconProperties?,
+    
+    @SerializedName("geometry")
+    val geometry: Any? = null // GeoJSON Point geometry
+) {
+    // Computed properties for backward compatibility
+    val id: Int get() = properties?.id ?: 0
+    val floorId: Int get() = properties?.floorId ?: 0
+    val beaconTypeId: Int? get() = properties?.beaconTypeId
+    val name: String? get() = properties?.name
+    val uuid: String? get() = properties?.uuid
+    val majorId: Int? get() = properties?.majorId
+    val minorId: Int? get() = properties?.minorId
+    val isActive: Boolean get() = properties?.isActive ?: true
+    val isVisible: Boolean get() = properties?.isVisible ?: true
+    val batteryLevel: Int get() = properties?.batteryLevel ?: 100
+    val lastSeen: String? get() = properties?.lastSeen
+    val installationDate: String? get() = properties?.installationDate
+    val createdAt: String? get() = properties?.createdAt
+    val updatedAt: String? get() = properties?.updatedAt
+    val beaconType: BeaconType? get() = properties?.beaconType
+    
+    val major: Int get() = majorId ?: 0
+    val minor: Int get() = minorId ?: 0
+    
+    // Extract coordinates from geometry
+    private val coordinates: Pair<Double, Double>? by lazy {
+        GeometryUtils.extractCoordinatesFromGeometry(geometry)
+    }
+    
+    val x: Double get() = coordinates?.first ?: 0.0
+    val y: Double get() = coordinates?.second ?: 0.0
+    val latitude: Double? get() = coordinates?.second
+    val longitude: Double? get() = coordinates?.first
+}
+
+data class BeaconProperties(
     @SerializedName("id")
-    val id: Int,
+    val id: Int?,
     
     @SerializedName("floor_id")
-    val floorId: Int,
+    val floorId: Int?,
     
     @SerializedName("beacon_type_id")
     val beaconTypeId: Int? = null,
@@ -23,9 +65,6 @@ data class Beacon(
     
     @SerializedName("minor_id")
     val minorId: Int? = null,
-    
-    @SerializedName("geometry")
-    val geometry: Any? = null, // PostGIS Point geometry
     
     @SerializedName("is_active")
     val isActive: Boolean = true,
@@ -50,15 +89,7 @@ data class Beacon(
     
     @SerializedName("beacon_type")
     val beaconType: BeaconType? = null
-) {
-    // Computed properties for backward compatibility
-    val major: Int get() = majorId ?: 0
-    val minor: Int get() = minorId ?: 0
-    val x: Double get() = 0.0 // Will be extracted from geometry
-    val y: Double get() = 0.0 // Will be extracted from geometry  
-    val latitude: Double? get() = null // Will be extracted from geometry
-    val longitude: Double? get() = null // Will be extracted from geometry
-}
+)
 
 data class BeaconType(
     @SerializedName("id")
