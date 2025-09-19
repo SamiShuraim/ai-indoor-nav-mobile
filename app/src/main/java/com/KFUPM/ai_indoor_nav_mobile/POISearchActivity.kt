@@ -53,9 +53,28 @@ class POISearchActivity : AppCompatActivity() {
             } else {
                 Toast.makeText(this, "Invalid POI selected", Toast.LENGTH_SHORT).show()
             }
+
         }
         recyclerView.layoutManager = LinearLayoutManager(this)
         recyclerView.adapter = adapter
+    }
+    
+    private fun handlePOINavigation(poi: Feature) {
+        val name = poi.getStringProperty("name") ?: "Unknown POI"
+        val poiId = poi.getStringProperty("id")?.toIntOrNull()
+        
+        if (poiId == null) {
+            Toast.makeText(this, "Invalid POI ID", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        // Return POI data to MainActivity for navigation
+        val resultIntent = Intent().apply {
+            putExtra("poi_id", poiId)
+            putExtra("poi_name", name)
+        }
+        setResult(Activity.RESULT_OK, resultIntent)
+        finish()
     }
     
     private fun fetchPOIs() {

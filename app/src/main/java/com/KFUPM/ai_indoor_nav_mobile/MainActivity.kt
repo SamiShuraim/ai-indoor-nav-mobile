@@ -30,6 +30,7 @@ import org.maplibre.android.style.layers.*
 import org.maplibre.android.style.layers.PropertyFactory.*
 import org.maplibre.android.utils.ColorUtils
 import org.maplibre.geojson.*
+import org.maplibre.android.style.expressions.Expression.*
 import kotlinx.coroutines.*
 import okhttp3.*
 import org.maplibre.android.WellKnownTileServer
@@ -42,6 +43,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var mapLibreMap: MapLibreMap
     private lateinit var fabBluetooth: FloatingActionButton
     private lateinit var fabSearch: FloatingActionButton
+    private lateinit var fabClearPath: FloatingActionButton
     private lateinit var floorSelectorContainer: LinearLayout
     private lateinit var floorRecyclerView: RecyclerView
     private lateinit var floorSelectorAdapter: FloorSelectorAdapter
@@ -73,7 +75,6 @@ class MainActivity : AppCompatActivity() {
     
     // Clear path button
     private lateinit var fabClearPath: FloatingActionButton
-    
     companion object {
         private const val TAG = "MainActivity"
     }
@@ -96,6 +97,18 @@ class MainActivity : AppCompatActivity() {
                 
                 if (poiId != null && poiId != -1 && poiName != null) {
                     Log.d(TAG, "POI selected: $poiName (ID: $poiId)")
+                    handleNavigationToPOI(poiId, poiName)
+                }
+            }
+        }
+
+    private val poiSearchLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == Activity.RESULT_OK) {
+                val poiId = result.data?.getIntExtra("poi_id", -1) ?: -1
+                val poiName = result.data?.getStringExtra("poi_name") ?: "Unknown POI"
+                
+                if (poiId != -1) {
                     handleNavigationToPOI(poiId, poiName)
                 }
             }
@@ -153,16 +166,19 @@ class MainActivity : AppCompatActivity() {
         
         fabSearch.setOnClickListener {
             val intent = Intent(this, POISearchActivity::class.java)
+
             // Pass current building ID if available
             currentBuilding?.let { building ->
                 intent.putExtra("building_id", building.id)
                 intent.putExtra("building_name", building.name)
             }
+
             poiSearchLauncher.launch(intent)
         }
         
         fabClearPath.setOnClickListener {
             clearPath()
+
         }
     }
 
