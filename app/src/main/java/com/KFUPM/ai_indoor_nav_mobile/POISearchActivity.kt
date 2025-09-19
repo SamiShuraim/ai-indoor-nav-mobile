@@ -1,5 +1,7 @@
 package com.KFUPM.ai_indoor_nav_mobile
 
+import android.app.Activity
+import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
@@ -35,9 +37,22 @@ class POISearchActivity : AppCompatActivity() {
     private fun setupRecyclerView() {
         recyclerView = findViewById(R.id.recyclerView)
         adapter = POIAdapter { poi ->
-            // Handle POI click - for now just show a toast
+            // Handle POI click - return selected POI to MainActivity
             val name = poi.getStringProperty("name") ?: "Unknown POI"
-            Toast.makeText(this, "Clicked: $name", Toast.LENGTH_SHORT).show()
+            val poiId = poi.getNumberProperty("id")?.toInt()
+            
+            if (poiId != null) {
+                Log.d("POISearchActivity", "Selected POI: $name (ID: $poiId)")
+                
+                val resultIntent = Intent().apply {
+                    putExtra("poi_id", poiId)
+                    putExtra("poi_name", name)
+                }
+                setResult(Activity.RESULT_OK, resultIntent)
+                finish()
+            } else {
+                Toast.makeText(this, "Invalid POI selected", Toast.LENGTH_SHORT).show()
+            }
         }
         recyclerView.layoutManager = LinearLayoutManager(this)
         recyclerView.adapter = adapter

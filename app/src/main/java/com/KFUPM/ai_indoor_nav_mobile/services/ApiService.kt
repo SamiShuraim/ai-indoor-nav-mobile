@@ -8,6 +8,7 @@ import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.*
+import org.maplibre.geojson.FeatureCollection
 import java.io.IOException
 
 class ApiService {
@@ -338,6 +339,42 @@ class ApiService {
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error fetching route node GeoJSON", e)
+                null
+            }
+        }
+    }
+    
+    /**
+     * Find path from user location to a POI
+     */
+    suspend fun findPath(pathRequest: PathRequest): FeatureCollection? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val requestBody = RequestBody.create(
+                    MediaType.parse("application/json"),
+                    gson.toJson(pathRequest)
+                )
+                
+                val request = Request.Builder()
+                    .url("${ApiConstants.API_BASE_URL}${ApiConstants.Endpoints.FIND_PATH}")
+                    .post(requestBody)
+                    .addHeader("Content-Type", "application/json")
+                    .build()
+                
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val jsonString = response.body?.string()
+                        if (jsonString != null) {
+                            Log.d(TAG, "Path response: $jsonString")
+                            FeatureCollection.fromJson(jsonString)
+                        } else null
+                    } else {
+                        Log.e(TAG, "Failed to find path: ${response.code} - ${response.message}")
+                        null
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error finding path", e)
                 null
             }
         }
