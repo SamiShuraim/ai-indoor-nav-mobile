@@ -67,11 +67,14 @@ class MainActivity : AppCompatActivity() {
     private val beaconLayerId = "beacon-layer"
     private val routeNodeLayerId = "route-node-layer"
     
-    // Path visualization IDs
-    private val pathSourceId = "path-source"
+    // Path navigation IDs
+    private val pathNodesSourceId = "path-nodes-source"
+    private val pathEdgesSourceId = "path-edges-source"
     private val pathNodesLayerId = "path-nodes-layer"
     private val pathEdgesLayerId = "path-edges-layer"
     
+    // Clear path button
+    private lateinit var fabClearPath: FloatingActionButton
     companion object {
         private const val TAG = "MainActivity"
     }
@@ -82,6 +85,20 @@ class MainActivity : AppCompatActivity() {
                 enableUserLocation()
             } else {
                 // TODO: Handle permission denied (optional)
+            }
+        }
+    
+    private val poiSearchLauncher = 
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == Activity.RESULT_OK) {
+                val data = result.data
+                val poiId = data?.getIntExtra("poi_id", -1)
+                val poiName = data?.getStringExtra("poi_name")
+                
+                if (poiId != null && poiId != -1 && poiName != null) {
+                    Log.d(TAG, "POI selected: $poiName (ID: $poiId)")
+                    handleNavigationToPOI(poiId, poiName)
+                }
             }
         }
 
@@ -149,11 +166,19 @@ class MainActivity : AppCompatActivity() {
         
         fabSearch.setOnClickListener {
             val intent = Intent(this, POISearchActivity::class.java)
+
+            // Pass current building ID if available
+            currentBuilding?.let { building ->
+                intent.putExtra("building_id", building.id)
+                intent.putExtra("building_name", building.name)
+            }
+
             poiSearchLauncher.launch(intent)
         }
         
         fabClearPath.setOnClickListener {
-            clearCurrentPath()
+            clearPath()
+
         }
     }
 
@@ -1183,152 +1208,162 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Handle navigation request to a specific POI
+     * Handle navigation to a selected POI
      */
     private fun handleNavigationToPOI(poiId: Int, poiName: String) {
-        Log.d(TAG, "Starting navigation to POI: $poiName (ID: $poiId)")
-        
-        // Get user's current location
-        val locationComponent = mapLibreMap.locationComponent
-        val currentLocation = locationComponent.lastKnownLocation
-        
-        if (currentLocation == null) {
-            Toast.makeText(this, "Unable to get current location. Please enable location services.", Toast.LENGTH_LONG).show()
-            return
-        }
-        
-        // Create user location object
-        val userLocation = UserLocation(currentLocation.latitude, currentLocation.longitude)
-        
-        // Request path from API
         lifecycleScope.launch {
             try {
-                Toast.makeText(this@MainActivity, "Finding path to $poiName...", Toast.LENGTH_SHORT).show()
+                Log.d(TAG, "Starting navigation to POI: $poiName (ID: $poiId)")
                 
-                val pathGeoJson = apiService.findPath(userLocation, poiId)
+                // Get user's current location
+                val locationComponent = mapLibreMap.locationComponent
+                val userLocation = locationComponent.lastKnownLocation
                 
-                if (pathGeoJson != null) {
-                    Log.d(TAG, "Received path data: $pathGeoJson")
-                    displayPath(pathGeoJson)
-                    Toast.makeText(this@MainActivity, "Path found to $poiName", Toast.LENGTH_SHORT).show()
+                if (userLocation == null) {
+                    Toast.makeText(this@MainActivity, "Unable to get current location", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+                
+                // Create path request
+                val pathRequest = PathRequest(
+                    userLocation = UserLocation(
+                        latitude = userLocation.latitude,
+                        longitude = userLocation.longitude
+                    ),
+                    destinationPoiId = poiId
+                )
+                
+                // Call the path finding API
+                val pathFeatureCollection = apiService.findPath(pathRequest)
+                
+                if (pathFeatureCollection != null) {
+                    Log.d(TAG, "Path found with ${pathFeatureCollection.features()?.size ?: 0} features")
+                    displayPath(pathFeatureCollection)
+                    
+                    // Show clear path button
+                    fabClearPath.visibility = View.VISIBLE
+                    
+                    Toast.makeText(this@MainActivity, "Navigation path to $poiName", Toast.LENGTH_SHORT).show()
                 } else {
-                    Log.e(TAG, "Failed to get path from API")
-                    Toast.makeText(this@MainActivity, "Failed to find path to $poiName", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this@MainActivity, "No path found to $poiName", Toast.LENGTH_SHORT).show()
                 }
                 
             } catch (e: Exception) {
-                Log.e(TAG, "Error during navigation request", e)
-                Toast.makeText(this@MainActivity, "Error finding path: ${e.message}", Toast.LENGTH_LONG).show()
+                Log.e(TAG, "Error during navigation", e)
+                Toast.makeText(this@MainActivity, "Navigation error: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
     }
     
     /**
-     * Display the path on the map
+     * Display the navigation path on the map
      */
-    private fun displayPath(pathGeoJson: String) {
+    private fun displayPath(pathFeatureCollection: FeatureCollection) {
+        val style = mapLibreMap.style
+        if (style == null || !style.isFullyLoaded) {
+            Log.w(TAG, "Map style not ready for path display")
+            return
+        }
+        
         try {
-            val style = mapLibreMap.style
-            if (style == null) {
-                Log.w(TAG, "Map style not ready for path display")
+            Log.d(TAG, "Displaying navigation path...")
+            
+            // Clear existing path layers
+            clearPathLayers(style)
+            
+            val features = pathFeatureCollection.features() ?: return
+            if (features.isEmpty()) {
+                Log.w(TAG, "No path features to display")
                 return
             }
             
-            // Clear any existing path
-            clearPath(style)
+            // Separate path nodes and path edges
+            val pathNodes = mutableListOf<Feature>()
+            val pathEdges = mutableListOf<Feature>()
             
-            // Parse the GeoJSON response
-            val featureCollection = parseGeoJSONToFeatureCollection(pathGeoJson)
-            if (featureCollection == null) {
-                Log.e(TAG, "Failed to parse path GeoJSON")
-                return
+            features.forEach { feature ->
+                val isPathNode = feature.getBooleanProperty("is_path_node") ?: false
+                val isPathEdge = feature.getBooleanProperty("is_path_edge") ?: false
+                
+                when {
+                    isPathNode -> pathNodes.add(feature)
+                    isPathEdge -> pathEdges.add(feature)
+                }
             }
             
-            // Add path source
-            val pathSource = GeoJsonSource(pathSourceId, featureCollection)
-            style.addSource(pathSource)
+            Log.d(TAG, "Path contains ${pathNodes.size} nodes and ${pathEdges.size} edges")
             
-            // Add path nodes layer (blue circles)
-            val pathNodesLayer = CircleLayer(pathNodesLayerId, pathSourceId)
-                .withProperties(
-                    circleColor("#0080FF"), // Blue color for path nodes
-                    circleRadius(8f),
-                    circleStrokeColor("#FFFFFF"),
-                    circleStrokeWidth(2f)
-                )
-                .withFilter(eq(get("is_path_node"), literal(true)))
-            style.addLayer(pathNodesLayer)
+            // Add path edges (lines) with distinct color
+            if (pathEdges.isNotEmpty()) {
+                val pathEdgesCollection = FeatureCollection.fromFeatures(pathEdges)
+                val pathEdgesSource = GeoJsonSource(pathEdgesSourceId, pathEdgesCollection)
+                style.addSource(pathEdgesSource)
+                
+                val pathEdgesLayer = LineLayer(pathEdgesLayerId, pathEdgesSourceId)
+                    .withProperties(
+                        lineColor("#FF6B35"), // Orange-red color for path
+                        lineWidth(6f),
+                        lineOpacity(0.8f)
+                    )
+                style.addLayer(pathEdgesLayer)
+            }
             
-            // Add path edges layer (blue lines)
-            val pathEdgesLayer = LineLayer(pathEdgesLayerId, pathSourceId)
-                .withProperties(
-                    lineColor("#0080FF"), // Blue color for path edges
-                    lineWidth(6f),
-                    lineOpacity(0.8f)
-                )
-                .withFilter(eq(get("is_path_edge"), literal(true)))
-            style.addLayer(pathEdgesLayer)
+            // Add path nodes with distinct color
+            if (pathNodes.isNotEmpty()) {
+                val pathNodesCollection = FeatureCollection.fromFeatures(pathNodes)
+                val pathNodesSource = GeoJsonSource(pathNodesSourceId, pathNodesCollection)
+                style.addSource(pathNodesSource)
+                
+                val pathNodesLayer = CircleLayer(pathNodesLayerId, pathNodesSourceId)
+                    .withProperties(
+                        circleRadius(8f),
+                        circleColor("#FF6B35"), // Orange-red color for path nodes
+                        circleStrokeColor("#FFFFFF"),
+                        circleStrokeWidth(2f),
+                        circleOpacity(0.9f)
+                    )
+                style.addLayer(pathNodesLayer)
+            }
             
-            Log.d(TAG, "Path displayed successfully")
-            
-            // Show the clear path button
-            fabClearPath.visibility = View.VISIBLE
-            
-            // TODO: Fit the map to show the entire path
-            // fitMapToPath(featureCollection)
+            Log.d(TAG, "Navigation path displayed successfully")
             
         } catch (e: Exception) {
             Log.e(TAG, "Error displaying path", e)
-            Toast.makeText(this, "Error displaying path", Toast.LENGTH_SHORT).show()
         }
     }
     
     /**
-     * Clear existing path from the map
+     * Clear the navigation path from the map
      */
-    private fun clearPath(style: Style) {
+    private fun clearPath() {
+        val style = mapLibreMap.style
+        if (style == null || !style.isFullyLoaded) {
+            return
+        }
+        
+        clearPathLayers(style)
+        fabClearPath.visibility = View.GONE
+        
+        Toast.makeText(this, "Navigation path cleared", Toast.LENGTH_SHORT).show()
+        Log.d(TAG, "Navigation path cleared")
+    }
+    
+    /**
+     * Clear path layers from the map style
+     */
+    private fun clearPathLayers(style: Style) {
         try {
             // Remove layers
-            style.getLayer(pathNodesLayerId)?.let { style.removeLayer(it) }
-            style.getLayer(pathEdgesLayerId)?.let { style.removeLayer(it) }
+            style.getLayer(pathNodesLayerId)?.let { style.removeLayer(pathNodesLayerId) }
+            style.getLayer(pathEdgesLayerId)?.let { style.removeLayer(pathEdgesLayerId) }
             
-            // Remove source
-            style.getSource(pathSourceId)?.let { style.removeSource(pathSourceId) }
-            
-            Log.d(TAG, "Cleared existing path")
-            
-            // Hide the clear path button when path is cleared
-            fabClearPath.visibility = View.GONE
+            // Remove sources
+            style.getSource(pathNodesSourceId)?.let { style.removeSource(pathNodesSourceId) }
+            style.getSource(pathEdgesSourceId)?.let { style.removeSource(pathEdgesSourceId) }
         } catch (e: Exception) {
-            Log.w(TAG, "Error clearing path", e)
+            Log.w(TAG, "Error clearing path layers", e)
         }
     }
-    
-    /**
-     * Clear the current navigation path
-     */
-    private fun clearCurrentPath() {
-        try {
-            val style = mapLibreMap.style
-            if (style != null) {
-                clearPath(style)
-                fabClearPath.visibility = View.GONE
-                Toast.makeText(this, "Path cleared", Toast.LENGTH_SHORT).show()
-                Log.d(TAG, "Navigation path cleared by user")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error clearing current path", e)
-            Toast.makeText(this, "Error clearing path", Toast.LENGTH_SHORT).show()
-        }
-    }
-    
-    // TODO: Implement path fitting when coordinate access is resolved
-    // /**
-    //  * Fit the map to show the entire path
-    //  */
-    // private fun fitMapToPath(pathFeatureCollection: FeatureCollection) {
-    //     // Implementation removed due to coordinate access issues
-    // }
 
     override fun onStart() { super.onStart(); mapView.onStart() }
     override fun onResume() { super.onResume(); mapView.onResume() }

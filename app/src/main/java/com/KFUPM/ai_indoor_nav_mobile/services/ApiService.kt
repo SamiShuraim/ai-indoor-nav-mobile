@@ -9,7 +9,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
+import org.maplibre.geojson.FeatureCollection
+
 import java.io.IOException
 
 class ApiService {
@@ -105,6 +106,65 @@ class ApiService {
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error fetching POIs", e)
+                null
+            }
+        }
+    }
+    
+    /**
+     * Fetch POIs for a specific building (all floors)
+     */
+    suspend fun getPOIsByBuilding(buildingId: Int): List<POI>? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val request = Request.Builder()
+                    .url("${ApiConstants.API_BASE_URL}${ApiConstants.Endpoints.poisByBuilding(buildingId)}")
+                    .build()
+                
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val jsonString = response.body?.string()
+                        if (jsonString != null) {
+                            Log.d(TAG, "Building POIs response: $jsonString")
+                            val type = object : TypeToken<List<POI>>() {}.type
+                            gson.fromJson<List<POI>>(jsonString, type)
+                        } else null
+                    } else {
+                        Log.e(TAG, "Failed to fetch building POIs: ${response.code}")
+                        null
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error fetching building POIs", e)
+                null
+            }
+        }
+    }
+    
+    /**
+     * Fetch POIs for a specific building as GeoJSON
+     */
+    suspend fun getPOIsByBuildingAsGeoJSON(buildingId: Int): String? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val request = Request.Builder()
+                    .url("${ApiConstants.API_BASE_URL}${ApiConstants.Endpoints.poisByBuilding(buildingId)}")
+                    .build()
+                
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val jsonString = response.body?.string()
+                        if (jsonString != null) {
+                            Log.d(TAG, "Building POI GeoJSON response: $jsonString")
+                            jsonString
+                        } else null
+                    } else {
+                        Log.e(TAG, "Failed to fetch building POI GeoJSON: ${response.code}")
+                        null
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error fetching building POI GeoJSON", e)
                 null
             }
         }
@@ -287,17 +347,20 @@ class ApiService {
     }
     
     /**
-     * Find path from user location to POI
+     * Find path from user location to a POI
      */
-    suspend fun findPath(userLocation: UserLocation, destinationPoiId: Int): String? {
+    suspend fun findPath(pathRequest: PathRequest): FeatureCollection? {
         return withContext(Dispatchers.IO) {
             try {
-                val pathRequest = PathRequest(userLocation, destinationPoiId)
-                val requestBody = gson.toJson(pathRequest)
+                val requestBody = RequestBody.create(
+                    "application/json".toMediaType(),
+                    gson.toJson(pathRequest)
+                )
                 
                 val request = Request.Builder()
                     .url("${ApiConstants.API_BASE_URL}${ApiConstants.Endpoints.FIND_PATH}")
-                    .post(requestBody.toRequestBody("application/json".toMediaType()))
+                    .post(requestBody)
+                    .addHeader("Content-Type", "application/json")
                     .build()
                 
                 client.newCall(request).execute().use { response ->
@@ -305,10 +368,21 @@ class ApiService {
                         val jsonString = response.body?.string()
                         if (jsonString != null) {
                             Log.d(TAG, "Path response: $jsonString")
-                            jsonString
+                            
+                            // Handle different response formats
+                            val featureCollection = if (jsonString.trim().startsWith("[")) {
+                                // Response is an array of features - wrap in FeatureCollection
+                                val featureCollectionJson = """{"type": "FeatureCollection", "features": $jsonString}"""
+                                FeatureCollection.fromJson(featureCollectionJson)
+                            } else {
+                                // Response is already a FeatureCollection
+                                FeatureCollection.fromJson(jsonString)
+                            }
+                            
+                            featureCollection
                         } else null
                     } else {
-                        Log.e(TAG, "Failed to find path: ${response.code} - ${response.body?.string()}")
+                        Log.e(TAG, "Failed to find path: ${response.code} - ${response.message}")
                         null
                     }
                 }
