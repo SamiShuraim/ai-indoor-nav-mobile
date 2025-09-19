@@ -68,6 +68,8 @@ class POISearchActivity : AppCompatActivity() {
                     Log.d("POISearchActivity", "No building ID provided, fetching all POIs")
                     apiService.getAllPOIsAsGeoJSON()
                 }
+
+                Log.d("POISearchActivity", "Received GeoJSON: $geoJsonString")
                 
                 if (geoJsonString != null) {
                     val featureCollection = if (geoJsonString.trim().startsWith("[")) {
