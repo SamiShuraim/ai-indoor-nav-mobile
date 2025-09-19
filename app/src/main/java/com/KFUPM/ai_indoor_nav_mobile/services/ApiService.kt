@@ -8,6 +8,7 @@ import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.*
+import okhttp3.MediaType.Companion.toMediaType
 import org.maplibre.geojson.FeatureCollection
 import java.io.IOException
 
@@ -351,7 +352,7 @@ class ApiService {
         return withContext(Dispatchers.IO) {
             try {
                 val requestBody = RequestBody.create(
-                    MediaType.parse("application/json"),
+                    "application/json".toMediaType(),
                     gson.toJson(pathRequest)
                 )
                 
