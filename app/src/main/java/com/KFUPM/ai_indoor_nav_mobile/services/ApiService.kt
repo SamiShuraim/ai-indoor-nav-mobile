@@ -367,7 +367,18 @@ class ApiService {
                         val jsonString = response.body?.string()
                         if (jsonString != null) {
                             Log.d(TAG, "Path response: $jsonString")
-                            FeatureCollection.fromJson(jsonString)
+                            
+                            // Handle different response formats
+                            val featureCollection = if (jsonString.trim().startsWith("[")) {
+                                // Response is an array of features - wrap in FeatureCollection
+                                val featureCollectionJson = """{"type": "FeatureCollection", "features": $jsonString}"""
+                                FeatureCollection.fromJson(featureCollectionJson)
+                            } else {
+                                // Response is already a FeatureCollection
+                                FeatureCollection.fromJson(jsonString)
+                            }
+                            
+                            featureCollection
                         } else null
                     } else {
                         Log.e(TAG, "Failed to find path: ${response.code} - ${response.message}")
