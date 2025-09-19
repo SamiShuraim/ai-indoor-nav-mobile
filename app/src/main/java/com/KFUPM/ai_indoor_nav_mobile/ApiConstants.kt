@@ -45,6 +45,7 @@ object ApiConstants {
         const val POIS = "/api/Poi"
         fun poiById(id: Int) = "/api/Poi/$id"
         fun poisByFloor(floorId: Int) = "/api/Poi?floor=$floorId"
+        fun poisByBuilding(buildingId: Int) = "/api/Poi?building=$buildingId"
         
         // POI Categories
         const val POI_CATEGORIES = "/api/PoiCategory"

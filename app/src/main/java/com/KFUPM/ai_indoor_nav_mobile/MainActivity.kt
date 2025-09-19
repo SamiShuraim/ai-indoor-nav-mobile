@@ -127,6 +127,11 @@ class MainActivity : AppCompatActivity() {
         
         fabSearch.setOnClickListener {
             val intent = Intent(this, POISearchActivity::class.java)
+            // Pass current building ID if available
+            currentBuilding?.let { building ->
+                intent.putExtra("building_id", building.id)
+                intent.putExtra("building_name", building.name)
+            }
             startActivity(intent)
         }
     }

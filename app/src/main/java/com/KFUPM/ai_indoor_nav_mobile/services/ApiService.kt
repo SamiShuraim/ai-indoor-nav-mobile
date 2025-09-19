@@ -109,6 +109,65 @@ class ApiService {
     }
     
     /**
+     * Fetch POIs for a specific building (all floors)
+     */
+    suspend fun getPOIsByBuilding(buildingId: Int): List<POI>? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val request = Request.Builder()
+                    .url("${ApiConstants.API_BASE_URL}${ApiConstants.Endpoints.poisByBuilding(buildingId)}")
+                    .build()
+                
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val jsonString = response.body?.string()
+                        if (jsonString != null) {
+                            Log.d(TAG, "Building POIs response: $jsonString")
+                            val type = object : TypeToken<List<POI>>() {}.type
+                            gson.fromJson<List<POI>>(jsonString, type)
+                        } else null
+                    } else {
+                        Log.e(TAG, "Failed to fetch building POIs: ${response.code}")
+                        null
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error fetching building POIs", e)
+                null
+            }
+        }
+    }
+    
+    /**
+     * Fetch POIs for a specific building as GeoJSON
+     */
+    suspend fun getPOIsByBuildingAsGeoJSON(buildingId: Int): String? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val request = Request.Builder()
+                    .url("${ApiConstants.API_BASE_URL}${ApiConstants.Endpoints.poisByBuilding(buildingId)}")
+                    .build()
+                
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val jsonString = response.body?.string()
+                        if (jsonString != null) {
+                            Log.d(TAG, "Building POI GeoJSON response: $jsonString")
+                            jsonString
+                        } else null
+                    } else {
+                        Log.e(TAG, "Failed to fetch building POI GeoJSON: ${response.code}")
+                        null
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error fetching building POI GeoJSON", e)
+                null
+            }
+        }
+    }
+    
+    /**
      * Fetch beacons for a specific floor
      */
     suspend fun getBeaconsByFloor(floorId: Int): List<Beacon>? {
