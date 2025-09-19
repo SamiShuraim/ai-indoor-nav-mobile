@@ -28,6 +28,16 @@
         android:src="@drawable/ic_search"
         android:contentDescription="Search POIs" />
 
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/fabClearPath"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|start"
+        android:layout_margin="16dp"
+        android:src="@android:drawable/ic_menu_close_clear_cancel"
+        android:contentDescription="Clear Path"
+        android:visibility="gone" />
+
     <!-- Floor Selector Component -->
     <LinearLayout
         android:id="@+id/floorSelectorContainer"
