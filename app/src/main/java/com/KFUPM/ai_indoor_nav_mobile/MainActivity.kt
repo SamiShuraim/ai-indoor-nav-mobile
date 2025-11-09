@@ -36,6 +36,8 @@ import okhttp3.*
 import org.maplibre.android.WellKnownTileServer
 import java.io.IOException
 import com.google.android.material.floatingactionbutton.FloatingActionButton
+import com.KFUPM.ai_indoor_nav_mobile.localization.LocalizationController
+import android.os.Build
 
 class MainActivity : AppCompatActivity() {
 
@@ -49,6 +51,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var floorSelectorAdapter: FloorSelectorAdapter
     
     private val apiService = ApiService()
+    private lateinit var localizationController: LocalizationController
+    private var isLocalizationActive = false
     
     // Data
     private var currentBuilding: Building? = null
@@ -73,8 +77,10 @@ class MainActivity : AppCompatActivity() {
     private val pathNodesLayerId = "path-nodes-layer"
     private val pathEdgesLayerId = "path-edges-layer"
     
-    // Clear path button
-    private lateinit var fabClearPath: FloatingActionButton
+    // Localization position marker IDs
+    private val localizationMarkerSourceId = "localization-marker-source"
+    private val localizationMarkerLayerId = "localization-marker-layer"
+    private val localizationMarkerStrokeLayerId = "localization-marker-stroke-layer"
     companion object {
         private const val TAG = "MainActivity"
     }
@@ -132,6 +138,9 @@ class MainActivity : AppCompatActivity() {
         fabClearPath = findViewById(R.id.fabClearPath)
         floorSelectorContainer = findViewById(R.id.floorSelectorContainer)
         floorRecyclerView = findViewById(R.id.floorRecyclerView)
+        
+        // Initialize localization controller
+        localizationController = LocalizationController(this)
         
         setupFloorSelector()
         mapView.onCreate(savedInstanceState)
@@ -308,6 +317,9 @@ class MainActivity : AppCompatActivity() {
                 
                 // Update map display with all data
                 updateMapDisplayWithGeoJSON(poisGeoJSON, beaconsGeoJSON, routeNodesGeoJSON)
+                
+                // Initialize localization for this floor
+                initializeLocalization(floor.id)
                 
             } catch (e: Exception) {
                 Log.e(TAG, "Error loading floor data", e)
@@ -1365,6 +1377,188 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Initialize localization for the current floor
+     */
+    private fun initializeLocalization(floorId: Int) {
+        // Check if we have required Bluetooth permissions
+        if (!hasBluetoothPermissions()) {
+            Log.w(TAG, "Bluetooth permissions not granted, cannot start localization")
+            return
+        }
+        
+        lifecycleScope.launch {
+            try {
+                Log.d(TAG, "Initializing localization for floor $floorId...")
+                
+                // Stop any existing localization
+                if (isLocalizationActive) {
+                    localizationController.stop()
+                    isLocalizationActive = false
+                }
+                
+                // Try auto-initialization first (determines position automatically)
+                val success = localizationController.autoInitialize(
+                    availableFloorIds = listOf(floorId),
+                    scanDurationMs = 5000 // 5 seconds
+                )
+                
+                if (success) {
+                    // Start continuous localization
+                    localizationController.start()
+                    isLocalizationActive = true
+                    
+                    // Observe position updates
+                    observeLocalizationUpdates()
+                    
+                    Log.d(TAG, "Localization started successfully")
+                    Toast.makeText(this@MainActivity, "Indoor positioning active", Toast.LENGTH_SHORT).show()
+                } else {
+                    Log.w(TAG, "Auto-initialization failed, trying manual initialization...")
+                    
+                    // Fallback: manual initialization without specific starting position
+                    val manualSuccess = localizationController.initialize(floorId, null)
+                    if (manualSuccess) {
+                        localizationController.start()
+                        isLocalizationActive = true
+                        observeLocalizationUpdates()
+                        Log.d(TAG, "Localization started with manual initialization")
+                    } else {
+                        Log.e(TAG, "Failed to initialize localization")
+                    }
+                }
+                
+            } catch (e: Exception) {
+                Log.e(TAG, "Error initializing localization", e)
+            }
+        }
+    }
+    
+    /**
+     * Observe localization state updates and update the blue dot
+     */
+    private fun observeLocalizationUpdates() {
+        lifecycleScope.launch {
+            localizationController.localizationState.collect { state ->
+                val nodeId = state.currentNodeId
+                val confidence = state.confidence
+                
+                // Get position coordinates
+                val position = localizationController.getCurrentPosition()
+                
+                if (position != null) {
+                    val (x, y) = position
+                    Log.d(TAG, "Localization: node=$nodeId, pos=($x, $y), confidence=${String.format("%.2f", confidence)}")
+                    
+                    // Update blue dot on map
+                    updateLocalizationMarker(x, y, confidence)
+                } else {
+                    // Clear marker if no position
+                    clearLocalizationMarker()
+                }
+                
+                // Log debug info
+                state.debug?.let { debug ->
+                    Log.d(TAG, "Beacons visible: ${debug.visibleBeaconCount}")
+                    if (debug.junctionAmbiguity) {
+                        Log.d(TAG, "At junction - position may be ambiguous")
+                    }
+                }
+            }
+        }
+    }
+    
+    /**
+     * Update the localization marker (blue dot) on the map
+     */
+    private fun updateLocalizationMarker(x: Double, y: Double, confidence: Double) {
+        val style = mapLibreMap.style
+        if (style == null || !style.isFullyLoaded) {
+            return
+        }
+        
+        try {
+            // Create point feature for the marker
+            val point = Point.fromLngLat(x, y)
+            val feature = Feature.fromGeometry(point)
+            feature.addNumberProperty("confidence", confidence)
+            
+            val featureCollection = FeatureCollection.fromFeature(feature)
+            
+            // Add or update source
+            var source = style.getSource(localizationMarkerSourceId) as? GeoJsonSource
+            if (source != null) {
+                source.setGeoJson(featureCollection)
+            } else {
+                source = GeoJsonSource(localizationMarkerSourceId, featureCollection)
+                style.addSource(source)
+                
+                // Add inner circle layer (blue dot)
+                if (style.getLayer(localizationMarkerLayerId) == null) {
+                    val markerLayer = CircleLayer(localizationMarkerLayerId, localizationMarkerSourceId)
+                        .withProperties(
+                            circleRadius(10f),
+                            circleColor("#0080FF"), // Bright blue
+                            circleOpacity(0.8f)
+                        )
+                    style.addLayer(markerLayer)
+                }
+                
+                // Add outer stroke layer
+                if (style.getLayer(localizationMarkerStrokeLayerId) == null) {
+                    val strokeLayer = CircleLayer(localizationMarkerStrokeLayerId, localizationMarkerSourceId)
+                        .withProperties(
+                            circleRadius(12f),
+                            circleColor("#FFFFFF"), // White stroke
+                            circleOpacity(0.9f),
+                            circleStrokeWidth(2f),
+                            circleStrokeColor("#0080FF")
+                        )
+                    // Add stroke layer below the main layer
+                    style.addLayerBelow(strokeLayer, localizationMarkerLayerId)
+                }
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error updating localization marker", e)
+        }
+    }
+    
+    /**
+     * Clear the localization marker from the map
+     */
+    private fun clearLocalizationMarker() {
+        val style = mapLibreMap.style
+        if (style == null || !style.isFullyLoaded) {
+            return
+        }
+        
+        try {
+            style.getLayer(localizationMarkerLayerId)?.let { style.removeLayer(localizationMarkerLayerId) }
+            style.getLayer(localizationMarkerStrokeLayerId)?.let { style.removeLayer(localizationMarkerStrokeLayerId) }
+            style.getSource(localizationMarkerSourceId)?.let { style.removeSource(localizationMarkerSourceId) }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error clearing localization marker", e)
+        }
+    }
+    
+    /**
+     * Check if Bluetooth permissions are granted
+     */
+    private fun hasBluetoothPermissions(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // Android 12+
+            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == 
+                PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == 
+                PackageManager.PERMISSION_GRANTED
+        } else {
+            // Android 11 and below
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == 
+                PackageManager.PERMISSION_GRANTED
+        }
+    }
+
     override fun onStart() { super.onStart(); mapView.onStart() }
     override fun onResume() { super.onResume(); mapView.onResume() }
     override fun onPause() { super.onPause(); mapView.onPause() }
@@ -1372,6 +1566,13 @@ class MainActivity : AppCompatActivity() {
     override fun onLowMemory() { super.onLowMemory(); mapView.onLowMemory() }
     override fun onDestroy() {
         super.onDestroy()
+        
+        // Stop and cleanup localization
+        if (isLocalizationActive) {
+            localizationController.stop()
+        }
+        localizationController.cleanup()
+        
         mapView.onDestroy()
         apiService.cleanup()
     }
