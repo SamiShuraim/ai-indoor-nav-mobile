@@ -1,0 +1,32 @@
+# Files Created for Indoor Localization System
+
+## Core Implementation (10 files)
+app/src/main/java/com/KFUPM/ai_indoor_nav_mobile/localization/models/LocalizationModels.kt
+app/src/main/java/com/KFUPM/ai_indoor_nav_mobile/localization/BeaconScanner.kt
+app/src/main/java/com/KFUPM/ai_indoor_nav_mobile/localization/ImuTracker.kt
+app/src/main/java/com/KFUPM/ai_indoor_nav_mobile/localization/GraphModel.kt
+app/src/main/java/com/KFUPM/ai_indoor_nav_mobile/localization/ObservationModel.kt
+app/src/main/java/com/KFUPM/ai_indoor_nav_mobile/localization/TransitionModel.kt
+app/src/main/java/com/KFUPM/ai_indoor_nav_mobile/localization/HmmEngine.kt
+app/src/main/java/com/KFUPM/ai_indoor_nav_mobile/localization/ConfigProvider.kt
+app/src/main/java/com/KFUPM/ai_indoor_nav_mobile/localization/LocalizationController.kt
+app/src/main/java/com/KFUPM/ai_indoor_nav_mobile/localization/examples/LocalizationExample.kt
+
+## Unit Tests (4 files)
+app/src/test/java/com/KFUPM/ai_indoor_nav_mobile/localization/GraphModelTest.kt
+app/src/test/java/com/KFUPM/ai_indoor_nav_mobile/localization/ObservationModelTest.kt
+app/src/test/java/com/KFUPM/ai_indoor_nav_mobile/localization/TransitionModelTest.kt
+app/src/test/java/com/KFUPM/ai_indoor_nav_mobile/localization/HmmEngineTest.kt
+
+## Documentation (3 files)
+LOCALIZATION_README.md
+IMPLEMENTATION_SUMMARY.md
+QUICK_REFERENCE.md
+
+## Modified Files (1 file)
+app/src/main/AndroidManifest.xml (added ACTIVITY_RECOGNITION permission)
+
+## Configuration Files (1 file)
+local.properties (added Android SDK path)
+
+Total: 19 files created/modified
