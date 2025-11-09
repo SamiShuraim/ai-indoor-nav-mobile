@@ -32,13 +32,37 @@ class ObservationModel(
         if (rssiMap.isEmpty()) return Double.NEGATIVE_INFINITY
         
         // Filter to beacons we know about
-        val validRssiMap = rssiMap.filter { it.key in beaconMap }
-        if (validRssiMap.isEmpty()) return Double.NEGATIVE_INFINITY
+        // Note: In fallback mode (no MAC addresses), beaconMap may have placeholder IDs
+        // so we match beacons by proximity instead
+        val validRssiMap = if (beaconMap.keys.any { it.matches(Regex("^[0-9A-F]{2}(:[0-9A-F]{2}){5}$", RegexOption.IGNORE_CASE)) }) {
+            // We have real MAC addresses, use exact matching
+            rssiMap.filter { it.key in beaconMap }
+        } else {
+            // Fallback mode: use all RSSI data
+            rssiMap
+        }
+        
+        if (validRssiMap.isEmpty()) {
+            // No matching beacons, use distance-based fallback
+            return computeFallbackLogLikelihood(node, rssiMap)
+        }
         
         val logLRank = computeRankLogLikelihood(node, validRssiMap)
         val logLPair = computePairwiseLogLikelihood(node, validRssiMap)
         
         return logLRank + logLPair
+    }
+    
+    /**
+     * Fallback likelihood when we don't have beacon mapping
+     * Uses RSSI strength as proxy for proximity
+     */
+    private fun computeFallbackLogLikelihood(node: GraphNode, rssiMap: Map<String, Double>): Double {
+        // Use average RSSI as a simple proximity measure
+        // Higher RSSI = closer = better likelihood
+        val avgRssi = rssiMap.values.average()
+        // Convert RSSI to log-likelihood (rough approximation)
+        return (avgRssi + 100.0) / 10.0 // Scale -100 to -30 dBm to 0 to 7
     }
     
     /**

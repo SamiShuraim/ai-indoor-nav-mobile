@@ -48,12 +48,16 @@ class ConfigProvider(private val context: Context) {
                             val beacons = gson.fromJson<List<Beacon>>(jsonString, type)
                             
                             // Convert to LocalizationBeacon
-                            // Use MAC address (uuid) as ID if available, otherwise fall back to database ID
-                            val locBeacons = beacons.mapNotNull { beacon ->
+                            // Use MAC address (uuid) as ID if available, otherwise use name as placeholder
+                            val locBeacons = beacons.map { beacon ->
                                 val macAddress = beacon.uuid
                                 if (macAddress.isNullOrBlank()) {
-                                    Log.w(TAG, "Beacon ${beacon.name} has no MAC address (uuid), skipping")
-                                    null
+                                    Log.w(TAG, "Beacon ${beacon.name} has no MAC address (uuid), using name as placeholder")
+                                    LocalizationBeacon(
+                                        id = beacon.name ?: "beacon_${beacon.id}", // Use name as fallback
+                                        x = beacon.x,
+                                        y = beacon.y
+                                    )
                                 } else {
                                     LocalizationBeacon(
                                         id = macAddress.uppercase(), // Normalize MAC address to uppercase
