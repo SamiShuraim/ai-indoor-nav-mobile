@@ -122,23 +122,10 @@ class BeaconScanner(
     
     /**
      * Set known beacon IDs to track (MAC addresses)
-     * If empty set is provided, tracks ALL detected BLE devices (fallback mode)
      */
     fun setKnownBeaconIds(beaconIds: Set<String>) {
-        // Filter out non-MAC address IDs (names like "Beacon A")
-        val macAddresses = beaconIds.filter { it.matches(Regex("^[0-9A-F]{2}(:[0-9A-F]{2}){5}$", RegexOption.IGNORE_CASE)) }
-        
-        knownBeaconIds = if (macAddresses.isNotEmpty()) {
-            macAddresses.map { it.uppercase() }.toSet()
-        } else {
-            emptySet() // Empty = track all devices (fallback mode)
-        }
-        
-        if (knownBeaconIds.isEmpty()) {
-            Log.w(TAG, "No valid MAC addresses found, tracking ALL nearby BLE devices (fallback mode)")
-        } else {
-            Log.d(TAG, "Tracking ${knownBeaconIds.size} known beacons: $knownBeaconIds")
-        }
+        knownBeaconIds = beaconIds.map { it.uppercase() }.toSet()
+        Log.d(TAG, "Tracking ${knownBeaconIds.size} known beacons: $knownBeaconIds")
     }
     
     /**

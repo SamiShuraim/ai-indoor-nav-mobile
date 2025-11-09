@@ -62,7 +62,9 @@ class LocalizationController(private val context: Context) {
             try {
                 Log.d(TAG, "Auto-initializing localization...")
                 
-                val autoInit = AutoInitializer(context, configProvider)
+                // Create beacon name mapper for automatic MAC address detection
+                val beaconNameMapper = BeaconNameMapper(context)
+                val autoInit = AutoInitializer(context, configProvider, beaconNameMapper)
                 val result = autoInit.autoInitialize(availableFloorIds, scanDurationMs)
                 
                 if (result == null) {
@@ -135,8 +137,11 @@ class LocalizationController(private val context: Context) {
                     config = fetchedConfig
                 }
                 
-                // Fetch beacons
-                val beacons = configProvider.fetchBeacons(floorId)
+                // Create beacon name mapper for automatic MAC address detection
+                val beaconNameMapper = BeaconNameMapper(context)
+                
+                // Fetch beacons with name mapping support
+                val beacons = configProvider.fetchBeacons(floorId, beaconNameMapper)
                 if (beacons == null || beacons.isEmpty()) {
                     Log.e(TAG, "No beacons found for floor $floorId")
                     return@withContext false

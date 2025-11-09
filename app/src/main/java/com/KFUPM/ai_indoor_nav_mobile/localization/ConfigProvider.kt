@@ -32,9 +32,9 @@ class ConfigProvider(private val context: Context) {
     }
     
     /**
-     * Fetch beacons for a floor
+     * Fetch beacons for a floor and optionally map names to MAC addresses
      */
-    suspend fun fetchBeacons(floorId: Int): List<LocalizationBeacon>? {
+    suspend fun fetchBeacons(floorId: Int, beaconNameMapper: BeaconNameMapper? = null): List<LocalizationBeacon>? {
         return withContext(Dispatchers.IO) {
             try {
                 val url = "${ApiConstants.API_BASE_URL}${ApiConstants.Endpoints.beaconsByFloor(floorId)}"
@@ -47,20 +47,40 @@ class ConfigProvider(private val context: Context) {
                             val type = object : TypeToken<List<Beacon>>() {}.type
                             val beacons = gson.fromJson<List<Beacon>>(jsonString, type)
                             
+                            // If beacons don't have MAC addresses, try to map names to MACs
+                            var nameToMacMap: Map<String, String> = emptyMap()
+                            val beaconsWithoutMac = beacons.filter { it.uuid.isNullOrBlank() }
+                            
+                            if (beaconsWithoutMac.isNotEmpty() && beaconNameMapper != null) {
+                                Log.d(TAG, "Beacons missing MAC addresses, attempting to map names to MACs...")
+                                val beaconNames = beaconsWithoutMac.mapNotNull { it.name }
+                                nameToMacMap = beaconNameMapper.mapBeaconNamesToMacAddresses(beaconNames, 5000)
+                            }
+                            
                             // Convert to LocalizationBeacon
-                            // Use MAC address (uuid) as ID if available, otherwise use name as placeholder
-                            val locBeacons = beacons.map { beacon ->
-                                val macAddress = beacon.uuid
-                                if (macAddress.isNullOrBlank()) {
-                                    Log.w(TAG, "Beacon ${beacon.name} has no MAC address (uuid), using name as placeholder")
-                                    LocalizationBeacon(
-                                        id = beacon.name ?: "beacon_${beacon.id}", // Use name as fallback
-                                        x = beacon.x,
-                                        y = beacon.y
-                                    )
+                            // Use MAC address (uuid) as ID if available, otherwise try name mapping
+                            val locBeacons = beacons.mapNotNull { beacon ->
+                                val macAddress = when {
+                                    // First priority: uuid field from database
+                                    !beacon.uuid.isNullOrBlank() -> beacon.uuid.uppercase()
+                                    // Second priority: mapped MAC from beacon name
+                                    beacon.name != null && nameToMacMap.containsKey(beacon.name) -> {
+                                        val mappedMac = nameToMacMap[beacon.name]!!
+                                        Log.d(TAG, "Mapped beacon '${beacon.name}' to MAC $mappedMac")
+                                        mappedMac
+                                    }
+                                    // No MAC address available
+                                    else -> {
+                                        Log.w(TAG, "Beacon ${beacon.name} has no MAC address and couldn't be mapped, skipping")
+                                        null
+                                    }
+                                }
+                                
+                                if (macAddress == null) {
+                                    null
                                 } else {
                                     LocalizationBeacon(
-                                        id = macAddress.uppercase(), // Normalize MAC address to uppercase
+                                        id = macAddress,
                                         x = beacon.x,
                                         y = beacon.y
                                     )
