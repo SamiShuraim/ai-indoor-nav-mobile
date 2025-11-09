@@ -105,6 +105,8 @@ class LocalizationController(private val context: Context) {
                     windowSize = config.bleWindowSize,
                     emaGamma = config.bleEmaGamma
                 )
+                // Set known beacon IDs for filtering
+                beaconScanner?.setKnownBeaconIds(result.beacons.map { it.id }.toSet())
                 
                 imuTracker = ImuTracker(context)
                 
@@ -180,6 +182,8 @@ class LocalizationController(private val context: Context) {
                     windowSize = config.bleWindowSize,
                     emaGamma = config.bleEmaGamma
                 )
+                // Set known beacon IDs for filtering
+                beaconScanner?.setKnownBeaconIds(beacons.map { it.id }.toSet())
                 
                 imuTracker = ImuTracker(context)
                 

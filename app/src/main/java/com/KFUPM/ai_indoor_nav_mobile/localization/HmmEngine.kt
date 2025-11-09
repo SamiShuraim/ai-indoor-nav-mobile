@@ -188,15 +188,29 @@ class HmmEngine(
     private fun normalizeLogPosteriors(logPosteriors: Map<String, Double>): Map<String, Double> {
         if (logPosteriors.isEmpty()) return emptyMap()
         
-        val maxLog = logPosteriors.values.maxOrNull() ?: return emptyMap()
+        // Filter out invalid log values (NaN or infinite)
+        val validLogPosteriors = logPosteriors.filterValues { !it.isNaN() && it.isFinite() }
+        if (validLogPosteriors.isEmpty()) return emptyMap()
+        
+        val maxLog = validLogPosteriors.values.maxOrNull() ?: return emptyMap()
         
         // Shift and exponentiate
-        val expPosteriors = logPosteriors.mapValues { exp(it.value - maxLog) }
+        val expPosteriors = validLogPosteriors.mapValues { 
+            val expValue = exp(it.value - maxLog)
+            if (expValue.isNaN() || !expValue.isFinite()) 0.0 else expValue
+        }
+        
         val sum = expPosteriors.values.sum()
         
-        if (sum < 1e-10) return emptyMap()
+        // If sum is too small or invalid, return empty
+        if (sum < 1e-10 || sum.isNaN() || !sum.isFinite()) {
+            return emptyMap()
+        }
         
-        return expPosteriors.mapValues { it.value / sum }
+        return expPosteriors.mapValues { 
+            val normalized = it.value / sum
+            if (normalized.isNaN() || !normalized.isFinite()) 0.0 else normalized
+        }
     }
     
     /**
@@ -247,7 +261,9 @@ class HmmEngine(
      */
     private fun computeConfidence(posteriors: Map<String, Double>): Double {
         if (posteriors.isEmpty()) return 0.0
-        return posteriors.values.maxOrNull() ?: 0.0
+        val maxConfidence = posteriors.values.maxOrNull() ?: 0.0
+        // Ensure confidence is valid
+        return if (maxConfidence.isNaN() || !maxConfidence.isFinite()) 0.0 else maxConfidence
     }
     
     /**
