@@ -42,7 +42,85 @@ class LocalizationController(private val context: Context) {
     private var updateJob: Job? = null
     
     /**
-     * Initialize localization for a specific floor
+     * Auto-initialize by detecting current position from BLE scans
+     * 
+     * This method:
+     * 1. Scans for nearby beacons
+     * 2. Determines which floor you're on
+     * 3. Estimates initial position
+     * 4. Initializes localization system
+     * 
+     * @param availableFloorIds List of floor IDs to check (get from API)
+     * @param scanDurationMs How long to scan beacons (default 5s)
+     * @return true if successful, false otherwise
+     */
+    suspend fun autoInitialize(
+        availableFloorIds: List<Int>,
+        scanDurationMs: Long = 5000
+    ): Boolean {
+        return withContext(Dispatchers.IO) {
+            try {
+                Log.d(TAG, "Auto-initializing localization...")
+                
+                val autoInit = AutoInitializer(context, configProvider)
+                val result = autoInit.autoInitialize(availableFloorIds, scanDurationMs)
+                
+                if (result == null) {
+                    Log.e(TAG, "Auto-initialization failed")
+                    return@withContext false
+                }
+                
+                // Update config
+                config = result.config
+                currentFloorId = result.floorId
+                
+                // Initialize components
+                graphModel = GraphModel(result.graph)
+                observationModel = ObservationModel(
+                    beacons = result.beacons,
+                    rankWeight = config.rankWeight,
+                    pairwiseWeight = config.pairwiseWeight,
+                    distanceRatioSlope = config.distanceRatioSlope
+                )
+                transitionModel = TransitionModel(
+                    graphModel = graphModel!!,
+                    maxWalkingSpeed = config.maxWalkingSpeed,
+                    forwardBiasLambda = config.forwardBiasLambda,
+                    tickDeltaS = 1.0 / config.tickRateHz
+                )
+                hmmEngine = HmmEngine(
+                    graphModel = graphModel!!,
+                    observationModel = observationModel!!,
+                    transitionModel = transitionModel!!,
+                    hysteresisK = config.hysteresisK,
+                    searchRadiusM = config.searchRadiusM
+                )
+                
+                // Initialize HMM with detected position
+                hmmEngine?.initialize(result.initialNodeId)
+                
+                // Initialize sensors
+                beaconScanner = BeaconScanner(
+                    context = context,
+                    windowSize = config.bleWindowSize,
+                    emaGamma = config.bleEmaGamma
+                )
+                
+                imuTracker = ImuTracker(context)
+                
+                Log.d(TAG, "Auto-initialization successful!")
+                Log.d(TAG, "Floor: ${result.floorId}, Initial node: ${result.initialNodeId}, Confidence: ${String.format("%.2f", result.confidence)}")
+                
+                true
+            } catch (e: Exception) {
+                Log.e(TAG, "Error during auto-initialization", e)
+                false
+            }
+        }
+    }
+    
+    /**
+     * Initialize localization for a specific floor (manual mode)
      */
     suspend fun initialize(floorId: Int, initialNodeId: String? = null): Boolean {
         return withContext(Dispatchers.IO) {
