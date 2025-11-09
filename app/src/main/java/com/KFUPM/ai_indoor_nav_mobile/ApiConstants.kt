@@ -4,7 +4,7 @@ package com.KFUPM.ai_indoor_nav_mobile
  * API Configuration Constants
  */
 object ApiConstants {
-    const val API_BASE_URL = "http://192.168.152.223:5090"
+    const val API_BASE_URL = "https://ai-indoor-nav-api.onrender.com"
     
     // MapTiler Configuration (if needed)
     const val MAPTILER_API_KEY = ""
