@@ -21,6 +21,7 @@ import kotlin.math.abs
 
 /**
  * BLE Beacon Scanner with RSSI smoothing
+ * Only tracks beacons with MAC addresses in the knownBeaconIds set
  */
 class BeaconScanner(
     private val context: Context,
@@ -28,6 +29,9 @@ class BeaconScanner(
     private val emaGamma: Double = 0.5
 ) {
     private val TAG = "BeaconScanner"
+    
+    // Known beacon IDs (MAC addresses) to track
+    private var knownBeaconIds: Set<String> = emptySet()
     
     private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager.adapter
@@ -117,14 +121,28 @@ class BeaconScanner(
     }
     
     /**
+     * Set known beacon IDs to track (MAC addresses)
+     */
+    fun setKnownBeaconIds(beaconIds: Set<String>) {
+        knownBeaconIds = beaconIds.map { it.uppercase() }.toSet()
+        Log.d(TAG, "Tracking ${knownBeaconIds.size} known beacons: $knownBeaconIds")
+    }
+    
+    /**
      * Process individual scan result
+     * Only processes beacons that are in the known beacon IDs list
      */
     private fun processScanResult(result: ScanResult) {
         val device = result.device ?: return
         val rssi = result.rssi.toDouble()
         
         // Use MAC address as beacon ID (or parse from scan record if available)
-        val beaconId = device.address ?: return
+        val beaconId = device.address?.uppercase() ?: return
+        
+        // Filter: only track known beacons
+        if (knownBeaconIds.isNotEmpty() && beaconId !in knownBeaconIds) {
+            return
+        }
         
         // Add to window
         val window = rssiWindows.getOrPut(beaconId) { mutableListOf() }

@@ -14,7 +14,8 @@ import kotlin.math.sqrt
  */
 class AutoInitializer(
     private val context: Context,
-    private val configProvider: ConfigProvider
+    private val configProvider: ConfigProvider,
+    private val beaconNameMapper: BeaconNameMapper? = null
 ) {
     private val TAG = "AutoInitializer"
     
@@ -63,7 +64,7 @@ class AutoInitializer(
             val floorBeacons = mutableMapOf<Int, List<LocalizationBeacon>>()
             
             for (floorId in availableFloorIds) {
-                val beacons = configProvider.fetchBeacons(floorId)
+                val beacons = configProvider.fetchBeacons(floorId, beaconNameMapper)
                 if (beacons != null && beacons.isNotEmpty()) {
                     floorBeacons[floorId] = beacons
                 }

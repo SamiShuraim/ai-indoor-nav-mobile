@@ -27,9 +27,13 @@ data class RouteNode(
     val connectedNodes: List<String>? get() = connectedNodeIds?.map { it.toString() }
     
     // Extract coordinates from geometry
-    private val coordinates: Pair<Double, Double>? by lazy {
-        GeometryUtils.extractCoordinatesFromGeometry(geometry)
-    }
+    // Note: Using a computed property instead of lazy to avoid Gson deserialization issues
+    private val coordinates: Pair<Double, Double>?
+        get() = _coordinates ?: GeometryUtils.extractCoordinatesFromGeometry(geometry).also { _coordinates = it }
+    
+    // Transient backing field for caching (not serialized)
+    @Transient
+    private var _coordinates: Pair<Double, Double>? = null
     
     val x: Double get() = coordinates?.first ?: 0.0
     val y: Double get() = coordinates?.second ?: 0.0
