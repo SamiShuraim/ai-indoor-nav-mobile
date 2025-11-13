@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
 import android.view.View
+import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -51,6 +52,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var floorSelectorAdapter: FloorSelectorAdapter
     private lateinit var assignmentInfoContainer: LinearLayout
     private lateinit var assignmentInfoText: TextView
+    private lateinit var btnRetryApi: Button
     
     private val apiService = ApiService()
     private lateinit var localizationController: LocalizationController
@@ -136,6 +138,7 @@ class MainActivity : AppCompatActivity() {
         floorRecyclerView = findViewById(R.id.floorRecyclerView)
         assignmentInfoContainer = findViewById(R.id.assignmentInfoContainer)
         assignmentInfoText = findViewById(R.id.assignmentInfoText)
+        btnRetryApi = findViewById(R.id.btnRetryApi)
         
         // Initialize localization controller
         localizationController = LocalizationController(this)
@@ -183,7 +186,11 @@ class MainActivity : AppCompatActivity() {
         
         fabClearPath.setOnClickListener {
             clearPath()
-
+        }
+        
+        btnRetryApi.setOnClickListener {
+            btnRetryApi.visibility = View.GONE
+            initializeAppData()
         }
     }
 
@@ -198,8 +205,8 @@ class MainActivity : AppCompatActivity() {
                 val buildings = apiService.getBuildings()
                 
                 if (buildings.isNullOrEmpty()) {
-                    Log.w(TAG, "No buildings found, trying legacy POI endpoint...")
-                    fetchLegacyPOIs()
+                    Log.w(TAG, "No buildings found")
+                    showRetryButton()
                     return@launch
                 }
                 
@@ -211,10 +218,18 @@ class MainActivity : AppCompatActivity() {
                 fetchFloorsForBuilding(currentBuilding!!.id)
                 
             } catch (e: Exception) {
-                Log.e(TAG, "Error initializing app data, trying legacy approach", e)
-                fetchLegacyPOIs()
+                Log.e(TAG, "Error initializing app data", e)
+                showRetryButton()
             }
         }
+    }
+    
+    /**
+     * Show retry button when API call fails
+     */
+    private fun showRetryButton() {
+        btnRetryApi.visibility = View.VISIBLE
+        Toast.makeText(this, "Failed to load data. Please retry.", Toast.LENGTH_LONG).show()
     }
 
     /**
@@ -227,6 +242,7 @@ class MainActivity : AppCompatActivity() {
             
             if (buildingFloors.isNullOrEmpty()) {
                 Log.w(TAG, "No floors found for building: $buildingId")
+                showRetryButton()
                 return
             }
             
@@ -244,6 +260,7 @@ class MainActivity : AppCompatActivity() {
             
         } catch (e: Exception) {
             Log.e(TAG, "Error fetching floors", e)
+            showRetryButton()
         }
     }
 
@@ -1626,21 +1643,106 @@ class MainActivity : AppCompatActivity() {
      */
     private fun displayAssignment(assignment: UserAssignment) {
         try {
-            val floorName = currentFloor?.name ?: "?"
+            val floorNumber = currentFloor?.floorNumber ?: 0
             val healthEmoji = assignment.getHealthStatusEmoji()
             
-            // Compact format: 🚶 Ground Floor | 45 | ✅
-            // Or: ♿ First Floor | 72 | ⚠️
+            // Compact format: 🚶 F2 | 45 | ✅
+            // Or: ♿ F3 | 72 | ⚠️
             val statusEmoji = if (assignment.isDisabled) "⚠️" else "✅"
             
-            val infoText = "$healthEmoji $floorName | ${assignment.age} | $statusEmoji"
+            val infoText = "$healthEmoji F$floorNumber | ${assignment.age} | $statusEmoji"
             
             assignmentInfoText.text = infoText
             assignmentInfoContainer.visibility = View.VISIBLE
             
             Log.d(TAG, "Assignment displayed: $infoText")
+            
+            // Draw path to nearest node with correct accessibility level
+            drawPathToAccessibilityLevel(assignment)
+            
         } catch (e: Exception) {
             Log.e(TAG, "Error displaying assignment", e)
+        }
+    }
+    
+    /**
+     * Draw path to nearest node with correct accessibility level based on assignment
+     */
+    private fun drawPathToAccessibilityLevel(assignment: UserAssignment) {
+        lifecycleScope.launch {
+            try {
+                // Determine required accessibility level based on age and disability
+                val requiredLevel = when {
+                    assignment.isDisabled -> 1 // Highest accessibility (wheelchair accessible)
+                    assignment.age >= 65 -> 2 // Medium accessibility (elderly friendly)
+                    else -> 3 // Standard accessibility
+                }
+                
+                Log.d(TAG, "Finding nearest node with accessibility level $requiredLevel")
+                
+                // Get current position
+                val position = localizationController.getCurrentPosition()
+                if (position == null) {
+                    Log.w(TAG, "Position not available for path drawing")
+                    return@launch
+                }
+                
+                val (currentX, currentY) = position
+                
+                // Fetch route nodes for current floor
+                val floorId = currentFloor?.id
+                if (floorId == null) {
+                    Log.w(TAG, "Floor ID not available")
+                    return@launch
+                }
+                
+                val routeNodes = apiService.getRouteNodesByFloor(floorId)
+                if (routeNodes.isNullOrEmpty()) {
+                    Log.w(TAG, "No route nodes found for floor $floorId")
+                    return@launch
+                }
+                
+                // Find nearest node with matching level
+                val targetNode = routeNodes
+                    .filter { it.level == requiredLevel }
+                    .minByOrNull { node ->
+                        val dx = node.x - currentX
+                        val dy = node.y - currentY
+                        Math.sqrt(dx * dx + dy * dy)
+                    }
+                
+                if (targetNode == null) {
+                    Log.w(TAG, "No nodes found with accessibility level $requiredLevel")
+                    Toast.makeText(this@MainActivity, "No accessible route found for this level", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+                
+                Log.d(TAG, "Found target node ${targetNode.id} at (${targetNode.x}, ${targetNode.y})")
+                
+                // Create path request to target node
+                val pathRequest = PathRequest(
+                    userLocation = UserLocation(
+                        latitude = currentY,
+                        longitude = currentX
+                    ),
+                    destinationPoiId = targetNode.id // Using node ID as destination
+                )
+                
+                // Get and display path
+                val pathFeatureCollection = apiService.findPath(pathRequest)
+                
+                if (pathFeatureCollection != null) {
+                    displayPath(pathFeatureCollection)
+                    fabClearPath.visibility = View.VISIBLE
+                    Toast.makeText(this@MainActivity, "Path to accessibility level $requiredLevel", Toast.LENGTH_SHORT).show()
+                    Log.d(TAG, "Path to accessibility level $requiredLevel displayed")
+                } else {
+                    Log.w(TAG, "No path found to target node")
+                }
+                
+            } catch (e: Exception) {
+                Log.e(TAG, "Error drawing path to accessibility level", e)
+            }
         }
     }
     

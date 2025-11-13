@@ -92,4 +92,18 @@
 
     </LinearLayout>
 
+    <!-- API Retry Button -->
+    <Button
+        android:id="@+id/btnRetryApi"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:text="Retry"
+        android:textSize="18sp"
+        android:paddingStart="32dp"
+        android:paddingEnd="32dp"
+        android:paddingTop="16dp"
+        android:paddingBottom="16dp"
+        android:visibility="gone" />
+
 </FrameLayout>

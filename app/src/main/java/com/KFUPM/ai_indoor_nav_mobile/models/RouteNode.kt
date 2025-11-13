@@ -20,6 +20,7 @@ data class RouteNode(
     val isVisible: Boolean get() = properties?.isVisible ?: true
     val createdAt: String? get() = properties?.createdAt
     val updatedAt: String? get() = properties?.updatedAt
+    val level: Int? get() = properties?.level // Accessibility level (1, 2, or 3)
     
     val name: String? get() = "Node $id"
     val nodeType: String? get() = null
@@ -53,6 +54,9 @@ data class RouteNodeProperties(
     
     @SerializedName("is_visible")
     val isVisible: Boolean = true,
+    
+    @SerializedName("level")
+    val level: Int? = null, // Accessibility level: 1, 2, or 3 (null for most nodes)
     
     @SerializedName("created_at")
     val createdAt: String? = null,
