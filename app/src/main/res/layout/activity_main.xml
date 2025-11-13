@@ -72,24 +72,22 @@
     <!-- Assignment Info Display -->
     <LinearLayout
         android:id="@+id/assignmentInfoContainer"
-        android:layout_width="match_parent"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="bottom"
+        android:layout_gravity="bottom|start"
         android:layout_marginStart="16dp"
-        android:layout_marginEnd="16dp"
         android:layout_marginBottom="16dp"
         android:orientation="vertical"
         android:background="@drawable/floor_selector_background"
-        android:padding="12dp"
+        android:padding="10dp"
         android:visibility="gone">
 
         <TextView
             android:id="@+id/assignmentInfoText"
-            android:layout_width="match_parent"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:textSize="16sp"
+            android:textSize="15sp"
             android:textColor="@android:color/white"
-            android:gravity="center"
             android:textStyle="bold" />
 
     </LinearLayout>

@@ -56,6 +56,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var localizationController: LocalizationController
     private var isLocalizationActive = false
     private var currentAssignment: UserAssignment? = null
+    private var hasRequestedInitialAssignment = false
     
     // Data
     private var currentBuilding: Building? = null
@@ -260,6 +261,9 @@ class MainActivity : AppCompatActivity() {
     private fun selectFloor(floor: Floor) {
         currentFloor = floor
         floorSelectorAdapter.setSelectedFloor(floor.id)
+        
+        // Reset assignment flag when changing floors
+        hasRequestedInitialAssignment = false
         
         lifecycleScope.launch {
             try {
@@ -1374,11 +1378,8 @@ class MainActivity : AppCompatActivity() {
                     localizationController.start()
                     isLocalizationActive = true
                     
-                    // Observe position updates
+                    // Observe position updates (assignment will be requested once position is found)
                     observeLocalizationUpdates()
-                    
-                    // Request initial user assignment
-                    requestInitialAssignment(floorId)
                     
                     Log.d(TAG, "Localization started successfully")
                     Toast.makeText(this@MainActivity, "Indoor positioning active", Toast.LENGTH_SHORT).show()
@@ -1390,10 +1391,9 @@ class MainActivity : AppCompatActivity() {
                     if (manualSuccess) {
                         localizationController.start()
                         isLocalizationActive = true
-                        observeLocalizationUpdates()
                         
-                        // Request initial user assignment
-                        requestInitialAssignment(floorId)
+                        // Observe position updates (assignment will be requested once position is found)
+                        observeLocalizationUpdates()
                         
                         Log.d(TAG, "Localization started with manual initialization")
                     } else {
@@ -1425,6 +1425,15 @@ class MainActivity : AppCompatActivity() {
                     
                     // Update blue dot on map
                     updateLocalizationMarker(x, y, confidence)
+                    
+                    // Request initial assignment once position is found
+                    if (!hasRequestedInitialAssignment) {
+                        hasRequestedInitialAssignment = true
+                        currentFloor?.let { floor ->
+                            Log.d(TAG, "Position initially found - requesting assignment")
+                            requestInitialAssignment(floor.id)
+                        }
+                    }
                 } else {
                     // Clear marker if no position
                     clearLocalizationMarker()
@@ -1613,15 +1622,18 @@ class MainActivity : AppCompatActivity() {
     }
     
     /**
-     * Display the current assignment info
+     * Display the current assignment info with compact emoji format
      */
     private fun displayAssignment(assignment: UserAssignment) {
         try {
-            val floorName = currentFloor?.name ?: "Unknown"
+            val floorName = currentFloor?.name ?: "?"
             val healthEmoji = assignment.getHealthStatusEmoji()
-            val statusText = assignment.getHealthStatusText()
             
-            val infoText = "$healthEmoji Floor: $floorName | Age: ${assignment.age} | Status: $statusText"
+            // Compact format: 🚶 Ground Floor | 45 | ✅
+            // Or: ♿ First Floor | 72 | ⚠️
+            val statusEmoji = if (assignment.isDisabled) "⚠️" else "✅"
+            
+            val infoText = "$healthEmoji $floorName | ${assignment.age} | $statusEmoji"
             
             assignmentInfoText.text = infoText
             assignmentInfoContainer.visibility = View.VISIBLE
