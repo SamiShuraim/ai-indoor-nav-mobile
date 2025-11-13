@@ -161,10 +161,23 @@ Response:
 
 ## Completed Requirements
 
-✅ Routing uses artificial blue dot (Bluetooth RSSI position) instead of GPS  
+✅ Routing uses artificial blue dot (Bluetooth RSSI position) - **NEVER GPS**
+✅ **ALL GPS CODE REMOVED** - No GPS fallback anywhere in the app
 ✅ Assignment requested after beacons fetched and initial position located  
 ✅ Random age between 18-90  
 ✅ 20% chance of disabled status  
 ✅ Bluetooth button replaced with assignment button at top right  
 ✅ Assignment info displayed at bottom (floor, age, health status with emoji)  
 ✅ Button allows getting new assignments at any time
+
+## GPS Removal
+
+The following GPS-related code has been **COMPLETELY REMOVED** from MainActivity:
+- ❌ `locationPermissionRequest` - No longer requests location permissions for GPS
+- ❌ `checkLocationPermission()` - Removed entirely
+- ❌ `enableUserLocation()` - Removed entirely
+- ❌ GPS fallback in `handleNavigationToPOI()` - Now requires localization position
+- ❌ `LocationComponent` usage - No longer activates or uses GPS location component
+- ❌ `CameraMode.TRACKING` import - Removed
+
+**Note**: `ACCESS_FINE_LOCATION` permission is still required on Android 11 and below, but ONLY for Bluetooth beacon scanning, NOT for GPS. This is an Android system requirement for Bluetooth functionality.

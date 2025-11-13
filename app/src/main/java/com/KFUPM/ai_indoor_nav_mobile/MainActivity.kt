@@ -21,7 +21,6 @@ import com.KFUPM.ai_indoor_nav_mobile.R
 import com.KFUPM.ai_indoor_nav_mobile.models.*
 import com.KFUPM.ai_indoor_nav_mobile.services.ApiService
 import org.maplibre.android.MapLibre
-import org.maplibre.android.location.modes.CameraMode
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.MapLibreMap
@@ -89,14 +88,6 @@ class MainActivity : AppCompatActivity() {
         private const val TAG = "MainActivity"
     }
 
-    private val locationPermissionRequest =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            if (granted) {
-                enableUserLocation()
-            } else {
-                // TODO: Handle permission denied (optional)
-            }
-        }
     
     private val poiSearchLauncher = 
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -159,7 +150,6 @@ class MainActivity : AppCompatActivity() {
             mapLibreMap.setStyle(
                 Style.Builder().fromUri(BuildConfig.tileUrl)
             ) {
-                checkLocationPermission()
                 initializeAppData()
             }
         }
@@ -196,40 +186,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun checkLocationPermission() {
-        if (ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-        ) {
-            enableUserLocation()
-        } else {
-            locationPermissionRequest.launch(Manifest.permission.ACCESS_FINE_LOCATION)
-        }
-    }
-
-    @android.annotation.SuppressLint("MissingPermission")
-    private fun enableUserLocation() {
-        val locationComponent = mapLibreMap.locationComponent
-        locationComponent.activateLocationComponent(
-            org.maplibre.android.location.LocationComponentActivationOptions.builder(
-                this,
-                mapLibreMap.style!!
-            ).build()
-        )
-        locationComponent.isLocationComponentEnabled = true
-        locationComponent.cameraMode = CameraMode.TRACKING
-
-        val lastLocation = locationComponent.lastKnownLocation
-        lastLocation?.let {
-            mapLibreMap.animateCamera(
-                CameraUpdateFactory.newLatLngZoom(
-                    org.maplibre.android.geometry.LatLng(it.latitude, it.longitude),
-                    16.0 // Adjust zoom level as you like
-                )
-            )
-        }
-    }
 
     /**
      * Initialize app data by fetching buildings and selecting the first one
@@ -1232,33 +1188,22 @@ class MainActivity : AppCompatActivity() {
             try {
                 Log.d(TAG, "Starting navigation to POI: $poiName (ID: $poiId)")
                 
-                // Try to get position from localization (artificial blue dot)
+                // Get position from localization (artificial blue dot) - NEVER use GPS
                 val localizationPosition = localizationController.getCurrentPosition()
                 
-                val userLocation = if (localizationPosition != null) {
-                    // Use localization position (Bluetooth RSSI based)
-                    val (x, y) = localizationPosition
-                    Log.d(TAG, "Using localization position for routing: ($x, $y)")
-                    UserLocation(
-                        latitude = y,  // y is latitude
-                        longitude = x  // x is longitude
-                    )
-                } else {
-                    // Fallback to GPS if localization is not available
-                    val locationComponent = mapLibreMap.locationComponent
-                    val gpsLocation = locationComponent.lastKnownLocation
-                    
-                    if (gpsLocation == null) {
-                        Toast.makeText(this@MainActivity, "Unable to get current location", Toast.LENGTH_SHORT).show()
-                        return@launch
-                    }
-                    
-                    Log.d(TAG, "Using GPS position for routing (fallback)")
-                    UserLocation(
-                        latitude = gpsLocation.latitude,
-                        longitude = gpsLocation.longitude
-                    )
+                if (localizationPosition == null) {
+                    Toast.makeText(this@MainActivity, "Localization position not available. Please wait for indoor positioning to initialize.", Toast.LENGTH_LONG).show()
+                    return@launch
                 }
+                
+                // Use localization position (Bluetooth RSSI based)
+                val (x, y) = localizationPosition
+                Log.d(TAG, "Using localization position for routing: ($x, $y)")
+                
+                val userLocation = UserLocation(
+                    latitude = y,  // y is latitude
+                    longitude = x  // x is longitude
+                )
                 
                 // Create path request
                 val pathRequest = PathRequest(
@@ -1689,16 +1634,18 @@ class MainActivity : AppCompatActivity() {
     
     /**
      * Check if Bluetooth permissions are granted
+     * Note: ACCESS_FINE_LOCATION is required for Bluetooth scanning on Android 11 and below
+     * This is NOT used for GPS - only for Bluetooth beacon scanning
      */
     private fun hasBluetoothPermissions(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // Android 12+
+            // Android 12+: Use dedicated Bluetooth permissions
             ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == 
                 PackageManager.PERMISSION_GRANTED &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == 
                 PackageManager.PERMISSION_GRANTED
         } else {
-            // Android 11 and below
+            // Android 11 and below: ACCESS_FINE_LOCATION required for Bluetooth scanning
             ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == 
                 PackageManager.PERMISSION_GRANTED
         }
