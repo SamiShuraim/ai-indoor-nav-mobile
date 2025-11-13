@@ -11,13 +11,13 @@
 
     <!-- Floating Action Buttons -->
     <com.google.android.material.floatingactionbutton.FloatingActionButton
-        android:id="@+id/fabBluetooth"
+        android:id="@+id/fabAssignment"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="top|end"
         android:layout_margin="16dp"
-        android:src="@drawable/ic_bluetooth"
-        android:contentDescription="Bluetooth Devices" />
+        android:src="@drawable/ic_assignment"
+        android:contentDescription="New Assignment" />
 
     <com.google.android.material.floatingactionbutton.FloatingActionButton
         android:id="@+id/fabSearch"
@@ -66,6 +66,31 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:orientation="vertical" />
+
+    </LinearLayout>
+
+    <!-- Assignment Info Display -->
+    <LinearLayout
+        android:id="@+id/assignmentInfoContainer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="16dp"
+        android:orientation="vertical"
+        android:background="@drawable/floor_selector_background"
+        android:padding="12dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/assignmentInfoText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="16sp"
+            android:textColor="@android:color/white"
+            android:gravity="center"
+            android:textStyle="bold" />
 
     </LinearLayout>
 

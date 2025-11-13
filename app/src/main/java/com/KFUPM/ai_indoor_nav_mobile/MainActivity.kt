@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.util.Log
 import android.view.View
 import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -43,16 +44,19 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var mapView: MapView
     private lateinit var mapLibreMap: MapLibreMap
-    private lateinit var fabBluetooth: FloatingActionButton
+    private lateinit var fabAssignment: FloatingActionButton
     private lateinit var fabSearch: FloatingActionButton
     private lateinit var fabClearPath: FloatingActionButton
     private lateinit var floorSelectorContainer: LinearLayout
     private lateinit var floorRecyclerView: RecyclerView
     private lateinit var floorSelectorAdapter: FloorSelectorAdapter
+    private lateinit var assignmentInfoContainer: LinearLayout
+    private lateinit var assignmentInfoText: TextView
     
     private val apiService = ApiService()
     private lateinit var localizationController: LocalizationController
     private var isLocalizationActive = false
+    private var currentAssignment: UserAssignment? = null
     
     // Data
     private var currentBuilding: Building? = null
@@ -133,11 +137,13 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         mapView = findViewById(R.id.mapView)
-        fabBluetooth = findViewById(R.id.fabBluetooth)
+        fabAssignment = findViewById(R.id.fabAssignment)
         fabSearch = findViewById(R.id.fabSearch)
         fabClearPath = findViewById(R.id.fabClearPath)
         floorSelectorContainer = findViewById(R.id.floorSelectorContainer)
         floorRecyclerView = findViewById(R.id.floorRecyclerView)
+        assignmentInfoContainer = findViewById(R.id.assignmentInfoContainer)
+        assignmentInfoText = findViewById(R.id.assignmentInfoText)
         
         // Initialize localization controller
         localizationController = LocalizationController(this)
@@ -168,9 +174,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupButtonListeners() {
-        fabBluetooth.setOnClickListener {
-            val intent = Intent(this, BluetoothDevicesActivity::class.java)
-            startActivity(intent)
+        fabAssignment.setOnClickListener {
+            requestNewAssignment()
         }
         
         fabSearch.setOnClickListener {
@@ -1227,21 +1232,37 @@ class MainActivity : AppCompatActivity() {
             try {
                 Log.d(TAG, "Starting navigation to POI: $poiName (ID: $poiId)")
                 
-                // Get user's current location
-                val locationComponent = mapLibreMap.locationComponent
-                val userLocation = locationComponent.lastKnownLocation
+                // Try to get position from localization (artificial blue dot)
+                val localizationPosition = localizationController.getCurrentPosition()
                 
-                if (userLocation == null) {
-                    Toast.makeText(this@MainActivity, "Unable to get current location", Toast.LENGTH_SHORT).show()
-                    return@launch
+                val userLocation = if (localizationPosition != null) {
+                    // Use localization position (Bluetooth RSSI based)
+                    val (x, y) = localizationPosition
+                    Log.d(TAG, "Using localization position for routing: ($x, $y)")
+                    UserLocation(
+                        latitude = y,  // y is latitude
+                        longitude = x  // x is longitude
+                    )
+                } else {
+                    // Fallback to GPS if localization is not available
+                    val locationComponent = mapLibreMap.locationComponent
+                    val gpsLocation = locationComponent.lastKnownLocation
+                    
+                    if (gpsLocation == null) {
+                        Toast.makeText(this@MainActivity, "Unable to get current location", Toast.LENGTH_SHORT).show()
+                        return@launch
+                    }
+                    
+                    Log.d(TAG, "Using GPS position for routing (fallback)")
+                    UserLocation(
+                        latitude = gpsLocation.latitude,
+                        longitude = gpsLocation.longitude
+                    )
                 }
                 
                 // Create path request
                 val pathRequest = PathRequest(
-                    userLocation = UserLocation(
-                        latitude = userLocation.latitude,
-                        longitude = userLocation.longitude
-                    ),
+                    userLocation = userLocation,
                     destinationPoiId = poiId
                 )
                 
@@ -1411,6 +1432,9 @@ class MainActivity : AppCompatActivity() {
                     // Observe position updates
                     observeLocalizationUpdates()
                     
+                    // Request initial user assignment
+                    requestInitialAssignment(floorId)
+                    
                     Log.d(TAG, "Localization started successfully")
                     Toast.makeText(this@MainActivity, "Indoor positioning active", Toast.LENGTH_SHORT).show()
                 } else {
@@ -1422,6 +1446,10 @@ class MainActivity : AppCompatActivity() {
                         localizationController.start()
                         isLocalizationActive = true
                         observeLocalizationUpdates()
+                        
+                        // Request initial user assignment
+                        requestInitialAssignment(floorId)
+                        
                         Log.d(TAG, "Localization started with manual initialization")
                     } else {
                         Log.e(TAG, "Failed to initialize localization")
@@ -1539,6 +1567,123 @@ class MainActivity : AppCompatActivity() {
             style.getSource(localizationMarkerSourceId)?.let { style.removeSource(localizationMarkerSourceId) }
         } catch (e: Exception) {
             Log.w(TAG, "Error clearing localization marker", e)
+        }
+    }
+    
+    /**
+     * Request initial user assignment after localization is initialized
+     */
+    private fun requestInitialAssignment(floorId: Int) {
+        lifecycleScope.launch {
+            try {
+                // Get current position from localization
+                val position = localizationController.getCurrentPosition()
+                
+                if (position != null) {
+                    val (x, y) = position
+                    Log.d(TAG, "Requesting initial assignment at position ($x, $y)")
+                    
+                    // Request assignment from backend
+                    var assignment = apiService.requestUserAssignment(floorId, x, y)
+                    
+                    // Fallback: Generate assignment locally if backend doesn't support it
+                    if (assignment == null) {
+                        Log.d(TAG, "Backend assignment not available, generating locally")
+                        assignment = generateLocalAssignment(floorId)
+                    }
+                    
+                    currentAssignment = assignment
+                    displayAssignment(assignment)
+                    Log.d(TAG, "Initial assignment received: age=${assignment.age}, disabled=${assignment.isDisabled}")
+                } else {
+                    Log.w(TAG, "Position not available for initial assignment")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error requesting initial assignment", e)
+            }
+        }
+    }
+    
+    /**
+     * Request a new assignment (when user clicks the assignment button)
+     */
+    private fun requestNewAssignment() {
+        val floorId = currentFloor?.id
+        
+        if (floorId == null) {
+            Toast.makeText(this, "No floor selected", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        lifecycleScope.launch {
+            try {
+                // Get current position from localization
+                val position = localizationController.getCurrentPosition()
+                
+                if (position != null) {
+                    val (x, y) = position
+                    Log.d(TAG, "Requesting new assignment at position ($x, $y)")
+                    
+                    // Request new assignment from backend
+                    var assignment = apiService.requestUserAssignment(floorId, x, y)
+                    
+                    // Fallback: Generate assignment locally if backend doesn't support it
+                    if (assignment == null) {
+                        Log.d(TAG, "Backend assignment not available, generating locally")
+                        assignment = generateLocalAssignment(floorId)
+                    }
+                    
+                    currentAssignment = assignment
+                    displayAssignment(assignment)
+                    Toast.makeText(this@MainActivity, "New assignment received", Toast.LENGTH_SHORT).show()
+                    Log.d(TAG, "New assignment received: age=${assignment.age}, disabled=${assignment.isDisabled}")
+                } else {
+                    Toast.makeText(this@MainActivity, "Position not available", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error requesting new assignment", e)
+                Toast.makeText(this@MainActivity, "Assignment error: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    
+    /**
+     * Generate a local assignment with random age and status
+     */
+    private fun generateLocalAssignment(floorId: Int): UserAssignment {
+        // Random age between 18 and 90
+        val age = (18..90).random()
+        
+        // 20% chance of being disabled
+        val isDisabled = Math.random() < 0.20
+        
+        val floorName = currentFloor?.name
+        
+        return UserAssignment(
+            age = age,
+            isDisabled = isDisabled,
+            floorId = floorId,
+            floorName = floorName
+        )
+    }
+    
+    /**
+     * Display the current assignment info
+     */
+    private fun displayAssignment(assignment: UserAssignment) {
+        try {
+            val floorName = currentFloor?.name ?: "Unknown"
+            val healthEmoji = assignment.getHealthStatusEmoji()
+            val statusText = assignment.getHealthStatusText()
+            
+            val infoText = "$healthEmoji Floor: $floorName | Age: ${assignment.age} | Status: $statusText"
+            
+            assignmentInfoText.text = infoText
+            assignmentInfoContainer.visibility = View.VISIBLE
+            
+            Log.d(TAG, "Assignment displayed: $infoText")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error displaying assignment", e)
         }
     }
     
