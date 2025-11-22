@@ -11,6 +11,8 @@ import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import org.maplibre.geojson.FeatureCollection
 
+import java.io.IOException
+
 class ApiService {
     private val client = OkHttpClient()
     private val gson = Gson()
@@ -343,7 +345,7 @@ class ApiService {
             }
         }
     }
-    
+
     /**
      * Assign a visitor ID via the load balancer
      */
@@ -354,7 +356,7 @@ class ApiService {
                     .url("${ApiConstants.API_BASE_URL}${ApiConstants.Endpoints.ASSIGN_VISITOR}")
                     .get()
                     .build()
-                
+
                 client.newCall(request).execute().use { response ->
                     if (response.isSuccessful) {
                         val jsonString = response.body?.string()
@@ -373,7 +375,48 @@ class ApiService {
             }
         }
     }
-    
+
+    /**
+     * Request user assignment from backend
+     */
+    suspend fun requestUserAssignment(floorId: Int, x: Double, y: Double): UserAssignment? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val assignmentRequest = AssignmentRequest(
+                    floorId = floorId,
+                    position = Position(x = x, y = y)
+                )
+
+                val requestBody = RequestBody.create(
+                    "application/json".toMediaType(),
+                    gson.toJson(assignmentRequest)
+                )
+
+                val request = Request.Builder()
+                    .url("${ApiConstants.API_BASE_URL}${ApiConstants.Endpoints.USER_ASSIGNMENT}")
+                    .post(requestBody)
+                    .addHeader("Content-Type", "application/json")
+                    .build()
+
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val jsonString = response.body?.string()
+                        if (jsonString != null) {
+                            Log.d(TAG, "User assignment response: $jsonString")
+                            gson.fromJson(jsonString, UserAssignment::class.java)
+                        } else null
+                    } else {
+                        Log.e(TAG, "Failed to request user assignment: ${response.code} - ${response.message}")
+                        null
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error requesting user assignment", e)
+                null
+            }
+        }
+    }
+
     /**
      * Find path from user location to a POI
      */
