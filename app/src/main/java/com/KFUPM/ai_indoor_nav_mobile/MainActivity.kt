@@ -72,6 +72,9 @@ class MainActivity : AppCompatActivity() {
 
     private var currentAssignment: UserAssignment? = null
     private var hasRequestedInitialAssignment = false
+    
+    // Mapping of node ID to floor ID for automatic floor switching
+    private val nodeToFloorMap = mutableMapOf<String, Int>()
 
     // Data
     private var currentBuilding: Building? = null
@@ -215,9 +218,6 @@ class MainActivity : AppCompatActivity() {
     private fun initializeAppData() {
         lifecycleScope.launch {
             try {
-                // First, assign a visitor ID
-                assignVisitorId()
-
                 Log.d(TAG, "Fetching buildings...")
                 val buildings = apiService.getBuildings()
                 
@@ -234,10 +234,40 @@ class MainActivity : AppCompatActivity() {
                 // Fetch floors for the selected building
                 fetchFloorsForBuilding(currentBuilding!!.id)
                 
+                // Load node-to-floor mappings for all floors to enable automatic floor switching
+                loadNodeToFloorMappings()
+                
             } catch (e: Exception) {
                 Log.e(TAG, "Error initializing app data", e)
                 showRetryButton()
             }
+        }
+    }
+    
+    /**
+     * Load node-to-floor mappings for all floors to enable automatic floor switching
+     */
+    private suspend fun loadNodeToFloorMappings() {
+        try {
+            Log.d(TAG, "Loading node-to-floor mappings for all floors...")
+            
+            // Load route nodes for each floor in parallel
+            val allRouteNodes = floors.map { floor ->
+                async { 
+                    apiService.getRouteNodesByFloor(floor.id)?.also { nodes ->
+                        Log.d(TAG, "Loaded ${nodes.size} nodes for floor ${floor.name}")
+                    }
+                }
+            }.awaitAll().filterNotNull().flatten()
+            
+            // Populate the mapping
+            allRouteNodes.forEach { node ->
+                nodeToFloorMap[node.id.toString()] = node.floorId
+            }
+            
+            Log.d(TAG, "Loaded ${nodeToFloorMap.size} node-to-floor mappings across ${floors.size} floors")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading node-to-floor mappings", e)
         }
     }
 
@@ -328,10 +358,18 @@ class MainActivity : AppCompatActivity() {
                 val poisDeferred = async { apiService.getPOIsByFloorAsGeoJSON(floor.id) }
                 val beaconsDeferred = async { apiService.getBeaconsByFloorAsGeoJSON(floor.id) }
                 val routeNodesDeferred = async { apiService.getRouteNodesByFloorAsGeoJSON(floor.id) }
+                val routeNodesListDeferred = async { apiService.getRouteNodesByFloor(floor.id) }
                 
                 val poisGeoJSON = poisDeferred.await()
                 val beaconsGeoJSON = beaconsDeferred.await()
                 val routeNodesGeoJSON = routeNodesDeferred.await()
+                val routeNodesList = routeNodesListDeferred.await()
+                
+                // Update node-to-floor mapping for automatic floor switching
+                routeNodesList?.forEach { node ->
+                    nodeToFloorMap[node.id.toString()] = node.floorId
+                }
+                Log.d(TAG, "Updated node-to-floor mapping with ${routeNodesList?.size ?: 0} nodes for floor ${floor.id}")
                 
                 Log.d(TAG, "Loaded GeoJSON data for floor ${floor.name}")
                 
@@ -1438,6 +1476,11 @@ class MainActivity : AppCompatActivity() {
 
                     Log.d(TAG, "Localization started successfully")
                     Toast.makeText(this@MainActivity, "Indoor positioning active", Toast.LENGTH_SHORT).show()
+                    
+                    // Simulate assignment button click after localization starts
+                    runOnUiThread {
+                        fabAssignment.performClick()
+                    }
                 } else {
                     Log.w(TAG, "Auto-initialization failed, trying manual initialization...")
 
@@ -1451,6 +1494,11 @@ class MainActivity : AppCompatActivity() {
                         observeLocalizationUpdates()
 
                         Log.d(TAG, "Localization started with manual initialization")
+                        
+                        // Simulate assignment button click after localization starts
+                        runOnUiThread {
+                            fabAssignment.performClick()
+                        }
                     } else {
                         Log.e(TAG, "Failed to initialize localization")
                     }
@@ -1480,6 +1528,31 @@ class MainActivity : AppCompatActivity() {
 
                     // Update blue dot on map
                     updateLocalizationMarker(x, y, confidence)
+                    
+                    // Check for automatic floor switching
+                    if (nodeId != null && confidence > 0.6) { // Only switch if we're confident
+                        val detectedFloorId = nodeToFloorMap[nodeId]
+                        val currentFloorId = currentFloor?.id
+                        
+                        if (detectedFloorId != null && currentFloorId != null && detectedFloorId != currentFloorId) {
+                            Log.d(TAG, "Floor change detected: current=$currentFloorId, detected=$detectedFloorId")
+                            
+                            // Find the floor to switch to
+                            val targetFloor = floors.find { it.id == detectedFloorId }
+                            if (targetFloor != null) {
+                                Log.d(TAG, "Auto-switching to floor: ${targetFloor.name}")
+                                withContext(Dispatchers.Main) {
+                                    // Simulate floor button click
+                                    onFloorSelected(targetFloor)
+                                    Toast.makeText(
+                                        this@MainActivity, 
+                                        "Auto-switched to ${targetFloor.name}", 
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            }
+                        }
+                    }
 
                     // Request initial assignment once position is found
                     if (!hasRequestedInitialAssignment) {

@@ -27,7 +27,7 @@ class FloorSelectorAdapter(
 
     override fun onBindViewHolder(holder: FloorViewHolder, position: Int) {
         val floor = floors[position]
-        holder.floorName.text = floor.name
+        holder.floorName.text = "F${floor.floorNumber}"
         
         // Set selection state
         val isSelected = floor.id == selectedFloorId
