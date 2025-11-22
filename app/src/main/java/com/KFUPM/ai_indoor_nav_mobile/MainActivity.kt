@@ -1595,6 +1595,10 @@ class MainActivity : AppCompatActivity() {
                 val assignmentResponse = apiService.requestUserAssignment(age, isDisabled)
 
                 val assignment = if (assignmentResponse != null) {
+                    // Capture the visitor ID from the response
+                    visitorId = assignmentResponse.visitorId
+                    Log.d(TAG, "Visitor ID captured from assignment: $visitorId")
+                    
                     // Convert response to UserAssignment
                     UserAssignment(
                         age = assignmentResponse.decision.age,
@@ -1641,6 +1645,11 @@ class MainActivity : AppCompatActivity() {
                 val assignmentResponse = apiService.requestUserAssignment(age, isDisabled)
 
                 val assignment = if (assignmentResponse != null) {
+                    // Capture the visitor ID from the response
+                    visitorId = assignmentResponse.visitorId
+                    Log.d(TAG, "Visitor ID captured from new assignment: $visitorId")
+                    Toast.makeText(this@MainActivity, "New visitor ID: $visitorId", Toast.LENGTH_SHORT).show()
+                    
                     // Convert response to UserAssignment
                     UserAssignment(
                         age = assignmentResponse.decision.age,
