@@ -5,6 +5,7 @@ import android.app.Activity
 import android.app.Dialog
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.os.Bundle
@@ -325,7 +326,7 @@ class MainActivity : AppCompatActivity() {
             }
             
             floors = buildingFloors.sortedBy { it.floorNumber }
-            Log.d(TAG, "Found ${floors.size} floors")
+            Log.d(TAG, "Found ${floors.size} floors: ${floors.map { "id=${it.id}, num=${it.floorNumber}, name=${it.name}" }}")
             
             // Update floor selector
             floorSelectorAdapter.updateFloors(floors)
@@ -333,7 +334,10 @@ class MainActivity : AppCompatActivity() {
             
             // Select the first floor
             if (floors.isNotEmpty()) {
+                Log.d(TAG, "Selecting first floor: ${floors.first().name}")
                 selectFloor(floors.first())
+            } else {
+                Log.e(TAG, "No floors to select!")
             }
             
         } catch (e: Exception) {
@@ -354,8 +358,10 @@ class MainActivity : AppCompatActivity() {
      * Select and load data for the given floor
      */
     private fun selectFloor(floor: Floor) {
+        Log.d(TAG, "selectFloor called: id=${floor.id}, number=${floor.floorNumber}, name=${floor.name}")
         currentFloor = floor
         floorSelectorAdapter.setSelectedFloor(floor.id)
+        Log.d(TAG, "currentFloor set to: id=${currentFloor?.id}, number=${currentFloor?.floorNumber}, name=${currentFloor?.name}")
         
         // Reset assignment flag when changing floors
         hasRequestedInitialAssignment = false
@@ -365,7 +371,7 @@ class MainActivity : AppCompatActivity() {
                 Log.d(TAG, "Loading GeoJSON data for floor: ${floor.name}")
                 
                 // Fetch all GeoJSON data for the floor in parallel
-                val results = coroutineScope {
+                val (poisGeoJSON, beaconsGeoJSON, routeNodesGeoJSON, routeNodesList) = coroutineScope {
                     val poisDeferred = async { apiService.getPOIsByFloorAsGeoJSON(floor.id) }
                     val beaconsDeferred = async { apiService.getBeaconsByFloorAsGeoJSON(floor.id) }
                     val routeNodesDeferred = async { apiService.getRouteNodesByFloorAsGeoJSON(floor.id) }
@@ -379,11 +385,6 @@ class MainActivity : AppCompatActivity() {
                         routeNodesListDeferred.await()
                     )
                 }
-                
-                val poisGeoJSON = results.first
-                val beaconsGeoJSON = results.second
-                val routeNodesGeoJSON = results.third
-                val routeNodesList = results.fourth
                 
                 // Update node-to-floor mapping for automatic floor switching
                 routeNodesList?.forEach { node ->
@@ -1498,7 +1499,10 @@ class MainActivity : AppCompatActivity() {
                     Toast.makeText(this@MainActivity, "Indoor positioning active", Toast.LENGTH_SHORT).show()
                     
                     // Simulate assignment button click after localization starts
-                    runOnUiThread {
+                    // Wait a bit to ensure floors are loaded
+                    withContext(Dispatchers.Main) {
+                        delay(500) // Wait 500ms for initialization
+                        Log.d(TAG, "Auto-clicking assignment button: currentFloor=${currentFloor?.name}, floors.size=${floors.size}")
                         fabAssignment.performClick()
                     }
                 } else {
@@ -1516,7 +1520,10 @@ class MainActivity : AppCompatActivity() {
                         Log.d(TAG, "Localization started with manual initialization")
                         
                         // Simulate assignment button click after localization starts
-                        runOnUiThread {
+                        // Wait a bit to ensure floors are loaded
+                        withContext(Dispatchers.Main) {
+                            delay(500) // Wait 500ms for initialization
+                            Log.d(TAG, "Auto-clicking assignment button (manual init): currentFloor=${currentFloor?.name}, floors.size=${floors.size}")
                             fabAssignment.performClick()
                         }
                     } else {
@@ -1798,6 +1805,10 @@ class MainActivity : AppCompatActivity() {
      */
     private fun displayAssignment(assignment: UserAssignment) {
         try {
+            Log.d(TAG, "displayAssignment called: floorId=${assignment.floorId}, level=${assignment.level}, age=${assignment.age}, isDisabled=${assignment.isDisabled}")
+            Log.d(TAG, "Current floor: id=${currentFloor?.id}, number=${currentFloor?.floorNumber}, name=${currentFloor?.name}")
+            Log.d(TAG, "Available floors: ${floors.map { "id=${it.id}, num=${it.floorNumber}, name=${it.name}" }}")
+            
             // Look up the floor number from the assignment's floorId
             val floorNumber = if (assignment.floorId != null) {
                 val floor = floors.find { it.id == assignment.floorId }
@@ -1805,11 +1816,12 @@ class MainActivity : AppCompatActivity() {
                     Log.d(TAG, "Found floor for assignment: floorId=${assignment.floorId}, floorNumber=${floor.floorNumber}, name=${floor.name}")
                     floor.floorNumber
                 } else {
-                    Log.w(TAG, "No floor found with id=${assignment.floorId}. Available floors: ${floors.map { "id=${it.id}, number=${it.floorNumber}" }}")
+                    Log.e(TAG, "CRITICAL: No floor found with id=${assignment.floorId}. Available floors: ${floors.map { "id=${it.id}, number=${it.floorNumber}" }}")
+                    Log.e(TAG, "Falling back to currentFloor?.floorNumber: ${currentFloor?.floorNumber}")
                     currentFloor?.floorNumber ?: 1 // Default to 1 instead of 0
                 }
             } else {
-                Log.w(TAG, "Assignment has no floorId. Using currentFloor: ${currentFloor?.floorNumber}")
+                Log.e(TAG, "CRITICAL: Assignment has no floorId! Using currentFloor: id=${currentFloor?.id}, number=${currentFloor?.floorNumber}")
                 currentFloor?.floorNumber ?: 1 // Default to 1 instead of 0
             }
             
@@ -1972,11 +1984,24 @@ class MainActivity : AppCompatActivity() {
         val qrImageView = dialog.findViewById<ImageView>(R.id.qrCodeImageView)
         val visitorIdText = dialog.findViewById<TextView>(R.id.visitorIdText)
         val urlText = dialog.findViewById<TextView>(R.id.qrCodeUrlText)
+        val openBrowserButton = dialog.findViewById<Button>(R.id.openBrowserButton)
         val closeButton = dialog.findViewById<Button>(R.id.closeButton)
 
         qrImageView.setImageBitmap(qrBitmap)
         visitorIdText.text = "Visitor ID: $currentVisitorId"
         urlText.text = "Scan to view visitor information"
+
+        openBrowserButton.setOnClickListener {
+            // Open URL in browser
+            try {
+                val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(visitorUrl))
+                startActivity(browserIntent)
+                Log.d(TAG, "Opening visitor page in browser: $visitorUrl")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error opening browser", e)
+                Toast.makeText(this, "Could not open browser", Toast.LENGTH_SHORT).show()
+            }
+        }
 
         closeButton.setOnClickListener {
             dialog.dismiss()
