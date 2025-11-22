@@ -1691,12 +1691,12 @@ class MainActivity : AppCompatActivity() {
 
             Log.d(TAG, "Path redrawn for floor ${currentFloor?.name}: ${pastNodes.size} visited nodes, ${futureNodes.size} remaining nodes on this floor")
 
-            // Add floor transition indicators (stairs/elevator arrows)
-            addFloorTransitionIndicators(style, features, currentFloorId)
-
         } catch (e: Exception) {
             Log.e(TAG, "Error redrawing path with progress", e)
         }
+        
+        // Add floor transition indicators after path is drawn
+        addFloorTransitionIndicators(style, features, currentFloorId)
     }
 
     /**
@@ -1705,16 +1705,25 @@ class MainActivity : AppCompatActivity() {
     private fun addFloorTransitionIndicators(style: Style, features: List<Feature>, currentFloorId: Int) {
         lifecycleScope.launch {
             try {
+                Log.d(TAG, "🔍 Looking for floor transitions on floor $currentFloorId...")
                 val transitionFeatures = mutableListOf<Feature>()
                 
                 // Fetch node data for current floor if not cached
                 val routeNodes = apiService.getRouteNodesByFloor(currentFloorId)
-                routeNodes?.forEach { node ->
+                if (routeNodes == null || routeNodes.isEmpty()) {
+                    Log.w(TAG, "No route nodes found for floor $currentFloorId")
+                    return@launch
+                }
+                
+                // Cache node types
+                routeNodes.forEach { node ->
                     nodeTypeCache[node.id] = node.nodeType
+                    Log.d(TAG, "Node ${node.id}: type=${node.nodeType}")
                 }
                 
                 // Get all path nodes
                 val pathNodes = features.filter { it.getBooleanProperty("is_path_node") == true }
+                Log.d(TAG, "Found ${pathNodes.size} path nodes to check")
                 
                 // Find transition nodes (stairs/elevators) on current floor
                 pathNodes.forEach { feature ->
@@ -1728,12 +1737,19 @@ class MainActivity : AppCompatActivity() {
                         if (nodeFloorId == currentFloorId) {
                             val nodeType = nodeTypeCache[nodeId]
                             
+                            Log.d(TAG, "Checking node $nodeId (type: $nodeType)")
+                            
                             if (nodeType?.contains("stair", ignoreCase = true) == true || 
                                 nodeType?.contains("elevator", ignoreCase = true) == true) {
+                                
+                                Log.d(TAG, "✅ Found transition node: $nodeId ($nodeType)")
+                                
                                 // This is a transition node - find connected nodes on different floors
                                 val connectedFloors = findConnectedFloors(nodeId, features)
                                 
                                 if (connectedFloors.isNotEmpty()) {
+                                    Log.d(TAG, "  Connected to ${connectedFloors.size} other floors")
+                                    
                                     // Get the geometry from the feature
                                     val geometry = feature.geometry()
                                     if (geometry is Point) {
@@ -1743,13 +1759,20 @@ class MainActivity : AppCompatActivity() {
                                             if (targetFloor != null) {
                                                 // Create indicator feature
                                                 val indicator = Feature.fromGeometry(geometry)
-                                                indicator.addStringProperty("text", "$direction F${targetFloor.floorNumber}")
+                                                val text = "$direction F${targetFloor.floorNumber}"
+                                                indicator.addStringProperty("text", text)
                                                 indicator.addStringProperty("direction", direction)
                                                 indicator.addNumberProperty("targetFloor", targetFloor.floorNumber)
                                                 transitionFeatures.add(indicator)
+                                                
+                                                Log.d(TAG, "  📍 Creating indicator: '$text' at (${geometry.coordinates()[0]}, ${geometry.coordinates()[1]})")
                                             }
                                         }
+                                    } else {
+                                        Log.w(TAG, "  ⚠️ Node geometry is not a Point: ${geometry?.type()}")
                                     }
+                                } else {
+                                    Log.d(TAG, "  ⚠️ No connected floors found")
                                 }
                             }
                         }
@@ -1758,13 +1781,16 @@ class MainActivity : AppCompatActivity() {
                 
                 // Add all indicators at once on main thread
                 if (transitionFeatures.isNotEmpty()) {
+                    Log.d(TAG, "🎯 Adding ${transitionFeatures.size} transition indicators to map")
                     withContext(Dispatchers.Main) {
                         addTransitionIndicatorsToMap(style, transitionFeatures)
                     }
+                } else {
+                    Log.w(TAG, "⚠️ No transition indicators found to display")
                 }
                 
             } catch (e: Exception) {
-                Log.e(TAG, "Error adding floor transition indicators", e)
+                Log.e(TAG, "❌ Error adding floor transition indicators", e)
             }
         }
     }
@@ -1812,33 +1838,48 @@ class MainActivity : AppCompatActivity() {
      */
     private fun addTransitionIndicatorsToMap(style: Style, indicators: List<Feature>) {
         try {
-            if (indicators.isEmpty()) return
+            if (indicators.isEmpty()) {
+                Log.d(TAG, "No transition indicators to add")
+                return
+            }
             
             // Remove existing layer and source
-            style.getLayer(transitionIndicatorsLayerId)?.let { style.removeLayer(transitionIndicatorsLayerId) }
-            style.getSource(transitionIndicatorsSourceId)?.let { style.removeSource(transitionIndicatorsSourceId) }
+            style.getLayer(transitionIndicatorsLayerId)?.let { 
+                style.removeLayer(transitionIndicatorsLayerId)
+                Log.d(TAG, "Removed existing transition indicators layer")
+            }
+            style.getSource(transitionIndicatorsSourceId)?.let { 
+                style.removeSource(transitionIndicatorsSourceId)
+                Log.d(TAG, "Removed existing transition indicators source")
+            }
             
             // Create feature collection
             val featureCollection = FeatureCollection.fromFeatures(indicators)
             val source = GeoJsonSource(transitionIndicatorsSourceId, featureCollection)
             style.addSource(source)
             
-            // Add symbol layer for text
+            // Add symbol layer for text with high visibility
             val textLayer = org.maplibre.android.style.layers.SymbolLayer(transitionIndicatorsLayerId, transitionIndicatorsSourceId)
                 .withProperties(
                     PropertyFactory.textField(get("text")),
-                    PropertyFactory.textSize(16f),
+                    PropertyFactory.textSize(20f), // Larger text
                     PropertyFactory.textColor("#FFFFFF"),
-                    PropertyFactory.textHaloColor("#FF6B35"),
-                    PropertyFactory.textHaloWidth(2f),
-                    PropertyFactory.textOffset(arrayOf(0f, -2f)),
+                    PropertyFactory.textHaloColor("#FF0000"), // Red halo for high visibility
+                    PropertyFactory.textHaloWidth(3f), // Thicker halo
+                    PropertyFactory.textHaloBlur(1f),
+                    PropertyFactory.textOffset(arrayOf(0f, -2.5f)),
                     PropertyFactory.textAnchor("bottom"),
-                    PropertyFactory.textAllowOverlap(true),
-                    PropertyFactory.textIgnorePlacement(true)
+                    PropertyFactory.textAllowOverlap(true), // Always show
+                    PropertyFactory.textIgnorePlacement(true), // Ignore collision
+                    PropertyFactory.iconAllowOverlap(true),
+                    PropertyFactory.textOptional(false) // Text is required
                 )
             style.addLayer(textLayer)
             
-            Log.d(TAG, "Added ${indicators.size} transition indicators")
+            Log.d(TAG, "✅ Added ${indicators.size} transition indicators to map")
+            indicators.forEach { indicator ->
+                Log.d(TAG, "  - Indicator: ${indicator.getStringProperty("text")} at ${indicator.geometry()}")
+            }
             
         } catch (e: Exception) {
             Log.e(TAG, "Error adding transition indicators to map", e)

@@ -59,7 +59,7 @@ data class LocalizationConfig(
     
     // HMM parameters
     val hysteresisK: Int = 2, // consecutive ticks
-    val tickRateHz: Double = 1.0,
+    val tickRateHz: Double = 0.5, // Once per 2 seconds
     val searchRadiusM: Double = 25.0, // for large graphs
     
     // Calibration parameters
