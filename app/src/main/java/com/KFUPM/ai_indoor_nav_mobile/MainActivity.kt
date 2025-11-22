@@ -2097,16 +2097,19 @@ class MainActivity : AppCompatActivity() {
                 return
             }
 
-            // Show the accessibility LEVEL (L1, L2, L3), not the floor number
-            val level = assignment.level ?: 1
+            // Get FLOOR NUMBER from trilaterated position (not level)
+            val floorNumber = getFloorNumberFromTrilateration() ?: (currentFloor?.floorNumber ?: 1)
+            
+            Log.d(TAG, "updateAssignmentDisplay: floorNumber=$floorNumber from trilateration")
             
             val healthEmoji = assignment.getHealthStatusEmoji()
             val statusEmoji = if (assignment.isDisabled) "⚠️" else "✅"
-            val infoText = "$healthEmoji L$level | ${assignment.age} | $statusEmoji"
+            val infoText = "$healthEmoji F$floorNumber | ${assignment.age} | $statusEmoji"
 
-            // Only update if text has changed to avoid unnecessary redraws
-            if (assignmentInfoText.text != infoText) {
+            // Update on main thread
+            runOnUiThread {
                 assignmentInfoText.text = infoText
+                Log.d(TAG, "Assignment display updated to: $infoText")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error updating assignment display", e)
@@ -2121,18 +2124,26 @@ class MainActivity : AppCompatActivity() {
             // Get current node from trilateration
             val currentNodeId = localizationController.localizationState.value.currentNodeId
             if (currentNodeId == null) {
+                Log.d(TAG, "getFloorNumberFromTrilateration: No current node yet")
                 return null
             }
 
             // Look up floor ID from node-to-floor mapping
             val floorId = nodeToFloorMap[currentNodeId]
             if (floorId == null) {
+                Log.w(TAG, "getFloorNumberFromTrilateration: No floor mapping for node $currentNodeId")
                 return null
             }
 
             // Find the floor object and return its floor number
             val floor = floors.find { it.id == floorId }
-            return floor?.floorNumber
+            if (floor == null) {
+                Log.w(TAG, "getFloorNumberFromTrilateration: No floor found for floorId $floorId")
+                return null
+            }
+            
+            Log.d(TAG, "getFloorNumberFromTrilateration: node=$currentNodeId -> floorId=$floorId -> floorNumber=${floor.floorNumber}")
+            return floor.floorNumber
         } catch (e: Exception) {
             Log.e(TAG, "Error getting floor number from trilateration", e)
             return null
