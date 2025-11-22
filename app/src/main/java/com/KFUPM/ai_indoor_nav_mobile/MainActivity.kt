@@ -116,6 +116,10 @@ class MainActivity : AppCompatActivity() {
     private val pastPathNodesLayerId = "past-path-nodes-layer"
     private val pastPathEdgesLayerId = "past-path-edges-layer"
     
+    // Floor transition indicators (stairs/elevator markers)
+    private val transitionIndicatorsSourceId = "transition-indicators-source"
+    private val transitionIndicatorsLayerId = "transition-indicators-layer"
+    
     // Localization position marker IDs
     private val localizationMarkerSourceId = "localization-marker-source"
     private val localizationMarkerLayerId = "localization-marker-layer"
@@ -125,6 +129,9 @@ class MainActivity : AppCompatActivity() {
     private var currentNavigationPath: FeatureCollection? = null
     private var targetNavigationLevel: Int? = null
     private val visitedPathNodeIds = mutableSetOf<Int>()
+    
+    // Cache for node types (to avoid repeated API calls)
+    private val nodeTypeCache = mutableMapOf<Int, String?>()
     companion object {
         private const val TAG = "MainActivity"
     }
@@ -1444,11 +1451,15 @@ class MainActivity : AppCompatActivity() {
             style.getLayer(pastPathNodesLayerId)?.let { style.removeLayer(pastPathNodesLayerId) }
             style.getLayer(pastPathEdgesLayerId)?.let { style.removeLayer(pastPathEdgesLayerId) }
             
+            // Remove transition indicators
+            style.getLayer(transitionIndicatorsLayerId)?.let { style.removeLayer(transitionIndicatorsLayerId) }
+            
             // Remove sources
             style.getSource(pathNodesSourceId)?.let { style.removeSource(pathNodesSourceId) }
             style.getSource(pathEdgesSourceId)?.let { style.removeSource(pathEdgesSourceId) }
             style.getSource(pastPathNodesSourceId)?.let { style.removeSource(pastPathNodesSourceId) }
             style.getSource(pastPathEdgesSourceId)?.let { style.removeSource(pastPathEdgesSourceId) }
+            style.getSource(transitionIndicatorsSourceId)?.let { style.removeSource(transitionIndicatorsSourceId) }
         } catch (e: Exception) {
             Log.w(TAG, "Error clearing path layers", e)
         }
@@ -1676,8 +1687,157 @@ class MainActivity : AppCompatActivity() {
 
             Log.d(TAG, "Path redrawn for floor ${currentFloor?.name}: ${pastNodes.size} visited nodes, ${futureNodes.size} remaining nodes on this floor")
 
+            // Add floor transition indicators (stairs/elevator arrows)
+            addFloorTransitionIndicators(style, features, currentFloorId)
+
         } catch (e: Exception) {
             Log.e(TAG, "Error redrawing path with progress", e)
+        }
+    }
+
+    /**
+     * Add floor transition indicators next to stairs/elevators
+     */
+    private fun addFloorTransitionIndicators(style: Style, features: List<Feature>, currentFloorId: Int) {
+        lifecycleScope.launch {
+            try {
+                val transitionFeatures = mutableListOf<Feature>()
+                
+                // Fetch node data for current floor if not cached
+                val routeNodes = apiService.getRouteNodesByFloor(currentFloorId)
+                routeNodes?.forEach { node ->
+                    nodeTypeCache[node.id] = node.nodeType
+                }
+                
+                // Get all path nodes
+                val pathNodes = features.filter { it.getBooleanProperty("is_path_node") == true }
+                
+                // Find transition nodes (stairs/elevators) on current floor
+                pathNodes.forEach { feature ->
+                    val nodeIdStr = feature.getStringProperty("id")
+                    val nodeId = nodeIdStr?.toIntOrNull()
+                    
+                    if (nodeId != null) {
+                        val nodeFloorId = nodeToFloorMap[nodeId.toString()]
+                        
+                        // Only process nodes on current floor
+                        if (nodeFloorId == currentFloorId) {
+                            val nodeType = nodeTypeCache[nodeId]
+                            
+                            if (nodeType?.contains("stair", ignoreCase = true) == true || 
+                                nodeType?.contains("elevator", ignoreCase = true) == true) {
+                                // This is a transition node - find connected nodes on different floors
+                                val connectedFloors = findConnectedFloors(nodeId, features)
+                                
+                                if (connectedFloors.isNotEmpty()) {
+                                    // Get the geometry from the feature
+                                    val geometry = feature.geometry()
+                                    if (geometry is Point) {
+                                        connectedFloors.forEach { (targetFloorId, direction) ->
+                                            // Get floor number
+                                            val targetFloor = floors.find { it.id == targetFloorId }
+                                            if (targetFloor != null) {
+                                                // Create indicator feature
+                                                val indicator = Feature.fromGeometry(geometry)
+                                                indicator.addStringProperty("text", "$direction F${targetFloor.floorNumber}")
+                                                indicator.addStringProperty("direction", direction)
+                                                indicator.addNumberProperty("targetFloor", targetFloor.floorNumber)
+                                                transitionFeatures.add(indicator)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Add all indicators at once on main thread
+                if (transitionFeatures.isNotEmpty()) {
+                    withContext(Dispatchers.Main) {
+                        addTransitionIndicatorsToMap(style, transitionFeatures)
+                    }
+                }
+                
+            } catch (e: Exception) {
+                Log.e(TAG, "Error adding floor transition indicators", e)
+            }
+        }
+    }
+
+    /**
+     * Find floors connected to this node via edges
+     */
+    private fun findConnectedFloors(nodeId: Int, features: List<Feature>): List<Pair<Int, String>> {
+        val connectedFloors = mutableListOf<Pair<Int, String>>()
+        val currentFloorId = nodeToFloorMap[nodeId.toString()] ?: return connectedFloors
+        
+        // Find all edges connected to this node
+        features.filter { it.getBooleanProperty("is_path_edge") == true }.forEach { edge ->
+            val fromNodeId = edge.getNumberProperty("from_node_id")?.toInt()
+            val toNodeId = edge.getNumberProperty("to_node_id")?.toInt()
+            
+            if (fromNodeId == nodeId || toNodeId == nodeId) {
+                val connectedNodeId = if (fromNodeId == nodeId) toNodeId else fromNodeId
+                if (connectedNodeId != null) {
+                    val connectedFloorId = nodeToFloorMap[connectedNodeId.toString()]
+                    
+                    if (connectedFloorId != null && connectedFloorId != currentFloorId) {
+                        // Determine direction
+                        val currentFloor = floors.find { it.id == currentFloorId }
+                        val connectedFloor = floors.find { it.id == connectedFloorId }
+                        
+                        if (currentFloor != null && connectedFloor != null) {
+                            val direction = if (connectedFloor.floorNumber > currentFloor.floorNumber) "↑" else "↓"
+                            
+                            // Avoid duplicates
+                            if (!connectedFloors.any { it.first == connectedFloorId }) {
+                                connectedFloors.add(Pair(connectedFloorId, direction))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        return connectedFloors
+    }
+
+    /**
+     * Add transition indicators to the map
+     */
+    private fun addTransitionIndicatorsToMap(style: Style, indicators: List<Feature>) {
+        try {
+            if (indicators.isEmpty()) return
+            
+            // Remove existing layer and source
+            style.getLayer(transitionIndicatorsLayerId)?.let { style.removeLayer(transitionIndicatorsLayerId) }
+            style.getSource(transitionIndicatorsSourceId)?.let { style.removeSource(transitionIndicatorsSourceId) }
+            
+            // Create feature collection
+            val featureCollection = FeatureCollection.fromFeatures(indicators)
+            val source = GeoJsonSource(transitionIndicatorsSourceId, featureCollection)
+            style.addSource(source)
+            
+            // Add symbol layer for text
+            val textLayer = org.maplibre.android.style.layers.SymbolLayer(transitionIndicatorsLayerId, transitionIndicatorsSourceId)
+                .withProperties(
+                    PropertyFactory.textField(get("text")),
+                    PropertyFactory.textSize(16f),
+                    PropertyFactory.textColor("#FFFFFF"),
+                    PropertyFactory.textHaloColor("#FF6B35"),
+                    PropertyFactory.textHaloWidth(2f),
+                    PropertyFactory.textOffset(arrayOf(0f, -2f)),
+                    PropertyFactory.textAnchor("bottom"),
+                    PropertyFactory.textAllowOverlap(true),
+                    PropertyFactory.textIgnorePlacement(true)
+                )
+            style.addLayer(textLayer)
+            
+            Log.d(TAG, "Added ${indicators.size} transition indicators")
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error adding transition indicators to map", e)
         }
     }
 
