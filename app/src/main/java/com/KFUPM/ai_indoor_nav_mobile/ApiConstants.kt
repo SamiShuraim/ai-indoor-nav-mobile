@@ -56,6 +56,10 @@ object ApiConstants {
         fun routeNodeById(id: Int) = "/api/RouteNode/$id"
         fun routeNodesByFloor(floorId: Int) = "/api/RouteNode?floor=$floorId"
         const val FIND_PATH = "/api/RouteNode/findPath"
+        
+        // Visitor / Load Balancer
+        const val ASSIGN_VISITOR = "/api/loadbalancer/arrivals/assign"
+        fun visitorPage(visitorId: String) = "/api/visitor/$visitorId/page"
     }
     
     // Storage Keys

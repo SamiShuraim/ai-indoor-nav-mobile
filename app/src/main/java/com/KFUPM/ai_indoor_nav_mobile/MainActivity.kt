@@ -65,6 +65,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var localizationController: LocalizationController
     private var isLocalizationActive = false
     
+    // Visitor ID for QR code
+    private var visitorId: String? = null
+    
     // Data
     private var currentBuilding: Building? = null
     private var floors: List<Floor> = emptyList()
@@ -247,6 +250,9 @@ class MainActivity : AppCompatActivity() {
     private fun initializeAppData() {
         lifecycleScope.launch {
             try {
+                // First, assign a visitor ID
+                assignVisitorId()
+                
                 Log.d(TAG, "Fetching buildings...")
                 val buildings = apiService.getBuildings()
                 
@@ -267,6 +273,27 @@ class MainActivity : AppCompatActivity() {
                 Log.e(TAG, "Error initializing app data, trying legacy approach", e)
                 fetchLegacyPOIs()
             }
+        }
+    }
+    
+    /**
+     * Assign a visitor ID from the API
+     */
+    private suspend fun assignVisitorId() {
+        try {
+            Log.d(TAG, "Requesting visitor ID assignment...")
+            val assignment = apiService.assignVisitor()
+            
+            if (assignment != null) {
+                visitorId = assignment.visitorId
+                Log.d(TAG, "Visitor ID assigned: $visitorId (Level: ${assignment.assignedLevel})")
+                Toast.makeText(this, "Welcome! Your visitor ID: $visitorId", Toast.LENGTH_LONG).show()
+            } else {
+                Log.w(TAG, "Failed to assign visitor ID")
+                Toast.makeText(this, "Could not assign visitor ID", Toast.LENGTH_SHORT).show()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error assigning visitor ID", e)
         }
     }
 
@@ -1578,11 +1605,22 @@ class MainActivity : AppCompatActivity() {
      * Show QR code dialog for visitor access
      */
     private fun showQrCodeDialog() {
-        // Generate or retrieve a visitor ID
-        // For demo purposes, using a sample ID. In production, this should call the API:
-        // GET /api/loadbalancer/arrivals/assign to get a real visitor ID
-        val visitorId = generateDemoVisitorId()
-        val visitorUrl = "${ApiConstants.API_BASE_URL}/api/visitor/$visitorId/page"
+        // Use the stored visitor ID from the API
+        val currentVisitorId = visitorId
+        
+        if (currentVisitorId == null) {
+            Toast.makeText(this, "No visitor ID assigned. Please try again later.", Toast.LENGTH_SHORT).show()
+            // Optionally, try to assign a new visitor ID
+            lifecycleScope.launch {
+                assignVisitorId()
+                if (visitorId != null) {
+                    showQrCodeDialog()
+                }
+            }
+            return
+        }
+        
+        val visitorUrl = "${ApiConstants.API_BASE_URL}/api/visitor/$currentVisitorId/page"
         
         // Generate QR code bitmap
         val qrBitmap = generateQrCode(visitorUrl, 800, 800)
@@ -1604,7 +1642,7 @@ class MainActivity : AppCompatActivity() {
         val closeButton = dialog.findViewById<Button>(R.id.closeButton)
         
         qrImageView.setImageBitmap(qrBitmap)
-        visitorIdText.text = "Visitor ID: $visitorId"
+        visitorIdText.text = "Visitor ID: $currentVisitorId"
         urlText.text = "Scan to view visitor information"
         
         closeButton.setOnClickListener {
@@ -1613,7 +1651,7 @@ class MainActivity : AppCompatActivity() {
         
         dialog.show()
         
-        Log.d(TAG, "QR code displayed for visitor ID: $visitorId")
+        Log.d(TAG, "QR code displayed for visitor ID: $currentVisitorId")
         Log.d(TAG, "QR code URL: $visitorUrl")
     }
     
@@ -1636,17 +1674,6 @@ class MainActivity : AppCompatActivity() {
             Log.e(TAG, "Error generating QR code", e)
             null
         }
-    }
-    
-    /**
-     * Generate a demo visitor ID for testing purposes
-     * In production, this should call the API: GET /api/loadbalancer/arrivals/assign
-     */
-    private fun generateDemoVisitorId(): String {
-        // Generate a random 4-digit code twice, separated by a dash
-        val part1 = (1000..9999).random()
-        val part2 = (1000..9999).random()
-        return "$part1-$part2"
     }
 
     override fun onStart() { super.onStart(); mapView.onStart() }

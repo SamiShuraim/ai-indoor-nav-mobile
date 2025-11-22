@@ -11,8 +11,6 @@ import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import org.maplibre.geojson.FeatureCollection
 
-import java.io.IOException
-
 class ApiService {
     private val client = OkHttpClient()
     private val gson = Gson()
@@ -341,6 +339,36 @@ class ApiService {
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error fetching route node GeoJSON", e)
+                null
+            }
+        }
+    }
+    
+    /**
+     * Assign a visitor ID via the load balancer
+     */
+    suspend fun assignVisitor(): VisitorAssignment? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val request = Request.Builder()
+                    .url("${ApiConstants.API_BASE_URL}${ApiConstants.Endpoints.ASSIGN_VISITOR}")
+                    .get()
+                    .build()
+                
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val jsonString = response.body?.string()
+                        if (jsonString != null) {
+                            Log.d(TAG, "Visitor assignment response: $jsonString")
+                            gson.fromJson(jsonString, VisitorAssignment::class.java)
+                        } else null
+                    } else {
+                        Log.e(TAG, "Failed to assign visitor: ${response.code}")
+                        null
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error assigning visitor", e)
                 null
             }
         }
