@@ -486,6 +486,62 @@ class ApiService {
             }
         }
     }
+
+    /**
+     * Navigate user to their assigned level after trilateration
+     */
+    suspend fun navigateToLevel(currentNodeId: Int, targetLevel: Int): FeatureCollection? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val navigationRequest = NavigateToLevelRequest(
+                    currentNodeId = currentNodeId,
+                    targetLevel = targetLevel
+                )
+
+                val requestBody = RequestBody.create(
+                    "application/json".toMediaType(),
+                    gson.toJson(navigationRequest)
+                )
+
+                Log.d(TAG, "Sending navigateToLevel request: currentNodeId=$currentNodeId, targetLevel=$targetLevel")
+
+                val request = Request.Builder()
+                    .url("${ApiConstants.API_BASE_URL}${ApiConstants.Endpoints.NAVIGATE_TO_LEVEL}")
+                    .post(requestBody)
+                    .addHeader("Content-Type", "application/json")
+                    .build()
+
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val jsonString = response.body?.string()
+                        if (jsonString != null) {
+                            Log.d(TAG, "NavigateToLevel response: $jsonString")
+
+                            // Handle different response formats
+                            val featureCollection = if (jsonString.trim().startsWith("[")) {
+                                // Response is an array of features - wrap in FeatureCollection
+                                val featureCollectionJson = """{"type": "FeatureCollection", "features": $jsonString}"""
+                                FeatureCollection.fromJson(featureCollectionJson)
+                            } else {
+                                // Response is already a FeatureCollection
+                                FeatureCollection.fromJson(jsonString)
+                            }
+
+                            featureCollection
+                        } else null
+                    } else {
+                        val errorBody = response.body?.string()
+                        Log.e(TAG, "Failed to navigate to level: ${response.code} - ${response.message}")
+                        Log.e(TAG, "Error body: $errorBody")
+                        null
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error navigating to level", e)
+                null
+            }
+        }
+    }
     
     fun cleanup() {
         client.dispatcher.executorService.shutdown()

@@ -82,6 +82,7 @@ class MainActivity : AppCompatActivity() {
     private var currentAssignment: UserAssignment? = null
     private var hasRequestedInitialAssignment = false
     private var hasAutoClickedAssignment = false // Track if we've auto-clicked the assignment button once
+    private var hasNavigatedToAssignedLevel = false // Track if we've navigated to the assigned level
     
     // Mapping of node ID to floor ID for automatic floor switching
     private val nodeToFloorMap = mutableMapOf<String, Int>()
@@ -1587,6 +1588,16 @@ class MainActivity : AppCompatActivity() {
                             requestInitialAssignment(floor.id)
                         }
                     }
+
+                    // Navigate to assigned level if we have both assignment and trilaterated position
+                    if (!hasNavigatedToAssignedLevel && nodeId != null && confidence > 0.5) {
+                        val assignment = currentAssignment
+                        if (assignment != null && assignment.level != null) {
+                            Log.d(TAG, "Both assignment and trilateration ready - triggering navigation")
+                            hasNavigatedToAssignedLevel = true
+                            navigateToAssignedLevel(assignment)
+                        }
+                    }
                 } else {
                     // Clear marker if no position
                     clearLocalizationMarker()
@@ -1768,6 +1779,8 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 currentAssignment = assignment
+                // Reset navigation flag to allow re-navigation with new assignment
+                hasNavigatedToAssignedLevel = false
                 displayAssignment(assignment)
                 Toast.makeText(this@MainActivity, "New assignment received", Toast.LENGTH_SHORT).show()
                 Log.d(TAG, "New assignment received: age=${assignment.age}, disabled=${assignment.isDisabled}, level=${assignment.level}")
@@ -1836,11 +1849,68 @@ class MainActivity : AppCompatActivity() {
 
             Log.d(TAG, "Assignment displayed: $infoText (floorId=${assignment.floorId}, level=${assignment.level}, accessibilityLevel=${assignment.level})")
 
-            // Draw path to nearest node with correct accessibility level
-            drawPathToAccessibilityLevel(assignment)
+            // Navigate user to their assigned level after trilateration
+            navigateToAssignedLevel(assignment)
 
         } catch (e: Exception) {
             Log.e(TAG, "Error displaying assignment", e)
+        }
+    }
+
+    /**
+     * Navigate user to their assigned level using trilaterated position
+     */
+    private fun navigateToAssignedLevel(assignment: UserAssignment) {
+        lifecycleScope.launch {
+            try {
+                // Get current node ID from localization (trilateration result)
+                val currentNodeId = localizationController.localizationState.value.currentNodeId
+                val targetLevel = assignment.level
+
+                if (currentNodeId == null) {
+                    Log.w(TAG, "Current node ID not available yet, waiting for trilateration...")
+                    // Fall back to the old method
+                    drawPathToAccessibilityLevel(assignment)
+                    return@launch
+                }
+
+                if (targetLevel == null) {
+                    Log.w(TAG, "Target level not available in assignment")
+                    // Fall back to the old method
+                    drawPathToAccessibilityLevel(assignment)
+                    return@launch
+                }
+
+                // Parse node ID to integer
+                val currentNodeIdInt = currentNodeId.toIntOrNull()
+                if (currentNodeIdInt == null) {
+                    Log.e(TAG, "Failed to parse current node ID: $currentNodeId")
+                    // Fall back to the old method
+                    drawPathToAccessibilityLevel(assignment)
+                    return@launch
+                }
+
+                Log.d(TAG, "Navigating to assigned level: currentNodeId=$currentNodeIdInt, targetLevel=$targetLevel")
+
+                // Call the navigateToLevel API
+                val pathFeatureCollection = apiService.navigateToLevel(currentNodeIdInt, targetLevel)
+
+                if (pathFeatureCollection != null) {
+                    Log.d(TAG, "Navigation path received with ${pathFeatureCollection.features()?.size ?: 0} features")
+                    displayPath(pathFeatureCollection)
+                    fabClearPath.visibility = View.VISIBLE
+                    Toast.makeText(this@MainActivity, "Navigation to Level $targetLevel", Toast.LENGTH_SHORT).show()
+                } else {
+                    Log.w(TAG, "No path found to assigned level, falling back to accessibility-based navigation")
+                    // Fall back to the old method
+                    drawPathToAccessibilityLevel(assignment)
+                }
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Error navigating to assigned level", e)
+                // Fall back to the old method
+                drawPathToAccessibilityLevel(assignment)
+            }
         }
     }
 

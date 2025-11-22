@@ -82,3 +82,14 @@ data class PathProperties(
     @SerializedName("to_node_id")
     val toNodeId: Int? = null
 )
+
+/**
+ * Request model for navigating to a specific level
+ */
+data class NavigateToLevelRequest(
+    @SerializedName("currentNodeId")
+    val currentNodeId: Int,
+    
+    @SerializedName("targetLevel")
+    val targetLevel: Int
+)
