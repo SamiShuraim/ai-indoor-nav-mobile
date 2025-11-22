@@ -10,7 +10,6 @@ import android.graphics.Color
 import android.os.Bundle
 import android.util.Log
 import android.view.View
-import android.widget.Button
 import android.view.Window
 import android.widget.Button
 import android.widget.ImageView
@@ -105,14 +104,14 @@ class MainActivity : AppCompatActivity() {
         private const val TAG = "MainActivity"
     }
 
-    private val locationPermissionRequest =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            if (granted) {
-                enableUserLocation()
-            } else {
-                // TODO: Handle permission denied (optional)
-            }
-        }
+//    private val locationPermissionRequest =
+//        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+//            if (granted) {
+//                enableUserLocation()
+//            } else {
+//                // TODO: Handle permission denied (optional)
+//            }
+//        }
     
     private val poiSearchLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -123,19 +122,6 @@ class MainActivity : AppCompatActivity() {
 
                 if (poiId != null && poiId != -1 && poiName != null) {
                     Log.d(TAG, "POI selected: $poiName (ID: $poiId)")
-                    handleNavigationToPOI(poiId, poiName)
-                }
-            }
-        }
-
-
-    private val poiSearchLauncher =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            if (result.resultCode == Activity.RESULT_OK) {
-                val poiId = result.data?.getIntExtra("poi_id", -1) ?: -1
-                val poiName = result.data?.getStringExtra("poi_name") ?: "Unknown POI"
-
-                if (poiId != -1) {
                     handleNavigationToPOI(poiId, poiName)
                 }
             }

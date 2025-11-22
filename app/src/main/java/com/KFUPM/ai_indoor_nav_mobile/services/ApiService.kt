@@ -393,7 +393,7 @@ class ApiService {
                 )
 
                 val request = Request.Builder()
-                    .url("${ApiConstants.API_BASE_URL}${ApiConstants.Endpoints.USER_ASSIGNMENT}")
+                    .url("${ApiConstants.API_BASE_URL}${ApiConstants.Endpoints.ASSIGN_VISITOR}")
                     .post(requestBody)
                     .addHeader("Content-Type", "application/json")
                     .build()
