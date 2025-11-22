@@ -56,6 +56,9 @@ object ApiConstants {
         fun routeNodeById(id: Int) = "/api/RouteNode/$id"
         fun routeNodesByFloor(floorId: Int) = "/api/RouteNode?floor=$floorId"
         const val FIND_PATH = "/api/RouteNode/findPath"
+        
+        // User Assignment
+        const val USER_ASSIGNMENT = "/api/UserAssignment"
     }
     
     // Storage Keys
