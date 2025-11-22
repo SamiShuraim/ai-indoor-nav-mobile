@@ -5,6 +5,7 @@ import android.app.Activity
 import android.app.Dialog
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.os.Bundle
@@ -50,6 +51,14 @@ import com.google.zxing.WriterException
 
 class MainActivity : AppCompatActivity() {
 
+    // Helper class for parallel API calls
+    private data class Quadruple<A, B, C, D>(
+        val first: A,
+        val second: B,
+        val third: C,
+        val fourth: D
+    )
+
     private lateinit var mapView: MapView
     private lateinit var mapLibreMap: MapLibreMap
     private lateinit var fabAssignment: FloatingActionButton
@@ -72,6 +81,10 @@ class MainActivity : AppCompatActivity() {
 
     private var currentAssignment: UserAssignment? = null
     private var hasRequestedInitialAssignment = false
+    private var hasAutoClickedAssignment = false // Track if we've auto-clicked the assignment button once
+    
+    // Mapping of node ID to floor ID for automatic floor switching
+    private val nodeToFloorMap = mutableMapOf<String, Int>()
 
     // Data
     private var currentBuilding: Building? = null
@@ -215,9 +228,6 @@ class MainActivity : AppCompatActivity() {
     private fun initializeAppData() {
         lifecycleScope.launch {
             try {
-                // First, assign a visitor ID
-                assignVisitorId()
-
                 Log.d(TAG, "Fetching buildings...")
                 val buildings = apiService.getBuildings()
                 
@@ -234,10 +244,42 @@ class MainActivity : AppCompatActivity() {
                 // Fetch floors for the selected building
                 fetchFloorsForBuilding(currentBuilding!!.id)
                 
+                // Load node-to-floor mappings for all floors to enable automatic floor switching
+                loadNodeToFloorMappings()
+                
             } catch (e: Exception) {
                 Log.e(TAG, "Error initializing app data", e)
                 showRetryButton()
             }
+        }
+    }
+    
+    /**
+     * Load node-to-floor mappings for all floors to enable automatic floor switching
+     */
+    private suspend fun loadNodeToFloorMappings() {
+        try {
+            Log.d(TAG, "Loading node-to-floor mappings for all floors...")
+            
+            // Load route nodes for each floor in parallel
+            val allRouteNodes = coroutineScope {
+                floors.map { floor ->
+                    async { 
+                        apiService.getRouteNodesByFloor(floor.id)?.also { nodes ->
+                            Log.d(TAG, "Loaded ${nodes.size} nodes for floor ${floor.name}")
+                        }
+                    }
+                }.awaitAll().filterNotNull().flatten()
+            }
+            
+            // Populate the mapping
+            allRouteNodes.forEach { node ->
+                nodeToFloorMap[node.id.toString()] = node.floorId
+            }
+            
+            Log.d(TAG, "Loaded ${nodeToFloorMap.size} node-to-floor mappings across ${floors.size} floors")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading node-to-floor mappings", e)
         }
     }
 
@@ -285,7 +327,7 @@ class MainActivity : AppCompatActivity() {
             }
             
             floors = buildingFloors.sortedBy { it.floorNumber }
-            Log.d(TAG, "Found ${floors.size} floors")
+            Log.d(TAG, "Found ${floors.size} floors: ${floors.map { "id=${it.id}, num=${it.floorNumber}, name=${it.name}" }}")
             
             // Update floor selector
             floorSelectorAdapter.updateFloors(floors)
@@ -293,7 +335,10 @@ class MainActivity : AppCompatActivity() {
             
             // Select the first floor
             if (floors.isNotEmpty()) {
+                Log.d(TAG, "Selecting first floor: ${floors.first().name}")
                 selectFloor(floors.first())
+            } else {
+                Log.e(TAG, "No floors to select!")
             }
             
         } catch (e: Exception) {
@@ -314,8 +359,10 @@ class MainActivity : AppCompatActivity() {
      * Select and load data for the given floor
      */
     private fun selectFloor(floor: Floor) {
+        Log.d(TAG, "selectFloor called: id=${floor.id}, number=${floor.floorNumber}, name=${floor.name}")
         currentFloor = floor
         floorSelectorAdapter.setSelectedFloor(floor.id)
+        Log.d(TAG, "currentFloor set to: id=${currentFloor?.id}, number=${currentFloor?.floorNumber}, name=${currentFloor?.name}")
         
         // Reset assignment flag when changing floors
         hasRequestedInitialAssignment = false
@@ -325,13 +372,26 @@ class MainActivity : AppCompatActivity() {
                 Log.d(TAG, "Loading GeoJSON data for floor: ${floor.name}")
                 
                 // Fetch all GeoJSON data for the floor in parallel
-                val poisDeferred = async { apiService.getPOIsByFloorAsGeoJSON(floor.id) }
-                val beaconsDeferred = async { apiService.getBeaconsByFloorAsGeoJSON(floor.id) }
-                val routeNodesDeferred = async { apiService.getRouteNodesByFloorAsGeoJSON(floor.id) }
+                val (poisGeoJSON, beaconsGeoJSON, routeNodesGeoJSON, routeNodesList) = coroutineScope {
+                    val poisDeferred = async { apiService.getPOIsByFloorAsGeoJSON(floor.id) }
+                    val beaconsDeferred = async { apiService.getBeaconsByFloorAsGeoJSON(floor.id) }
+                    val routeNodesDeferred = async { apiService.getRouteNodesByFloorAsGeoJSON(floor.id) }
+                    val routeNodesListDeferred = async { apiService.getRouteNodesByFloor(floor.id) }
+                    
+                    // Await all results and return as quadruple
+                    Quadruple(
+                        poisDeferred.await(),
+                        beaconsDeferred.await(),
+                        routeNodesDeferred.await(),
+                        routeNodesListDeferred.await()
+                    )
+                }
                 
-                val poisGeoJSON = poisDeferred.await()
-                val beaconsGeoJSON = beaconsDeferred.await()
-                val routeNodesGeoJSON = routeNodesDeferred.await()
+                // Update node-to-floor mapping for automatic floor switching
+                routeNodesList?.forEach { node ->
+                    nodeToFloorMap[node.id.toString()] = node.floorId
+                }
+                Log.d(TAG, "Updated node-to-floor mapping with ${routeNodesList?.size ?: 0} nodes for floor ${floor.id}")
                 
                 Log.d(TAG, "Loaded GeoJSON data for floor ${floor.name}")
                 
@@ -340,6 +400,19 @@ class MainActivity : AppCompatActivity() {
                 
                 // Initialize localization for this floor
                 initializeLocalization(floor.id)
+                
+                // Auto-click assignment button after first floor is fully loaded (only once at startup)
+                if (!hasAutoClickedAssignment) {
+                    hasAutoClickedAssignment = true
+                    delay(1000) // Give localization time to initialize
+                    withContext(Dispatchers.Main) {
+                        Log.d(TAG, "=== AUTO-CLICKING ASSIGNMENT BUTTON ===")
+                        Log.d(TAG, "currentFloor: id=${currentFloor?.id}, number=${currentFloor?.floorNumber}, name=${currentFloor?.name}")
+                        Log.d(TAG, "floors: ${floors.map { "id=${it.id}, num=${it.floorNumber}" }}")
+                        Toast.makeText(this@MainActivity, "🔄 Auto-requesting assignment...", Toast.LENGTH_LONG).show()
+                        fabAssignment.performClick()
+                    }
+                }
 
             } catch (e: Exception) {
                 Log.e(TAG, "Error loading floor data", e)
@@ -1480,6 +1553,31 @@ class MainActivity : AppCompatActivity() {
 
                     // Update blue dot on map
                     updateLocalizationMarker(x, y, confidence)
+                    
+                    // Check for automatic floor switching
+                    if (nodeId != null && confidence > 0.6) { // Only switch if we're confident
+                        val detectedFloorId = nodeToFloorMap[nodeId]
+                        val currentFloorId = currentFloor?.id
+                        
+                        if (detectedFloorId != null && currentFloorId != null && detectedFloorId != currentFloorId) {
+                            Log.d(TAG, "Floor change detected: current=$currentFloorId, detected=$detectedFloorId")
+                            
+                            // Find the floor to switch to
+                            val targetFloor = floors.find { it.id == detectedFloorId }
+                            if (targetFloor != null) {
+                                Log.d(TAG, "Auto-switching to floor: ${targetFloor.name}")
+                                withContext(Dispatchers.Main) {
+                                    // Simulate floor button click
+                                    onFloorSelected(targetFloor)
+                                    Toast.makeText(
+                                        this@MainActivity, 
+                                        "Auto-switched to ${targetFloor.name}", 
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            }
+                        }
+                    }
 
                     // Request initial assignment once position is found
                     if (!hasRequestedInitialAssignment) {
@@ -1589,7 +1687,7 @@ class MainActivity : AppCompatActivity() {
                 val age = (18..90).random()
                 val isDisabled = Math.random() < 0.20
 
-                Log.d(TAG, "Requesting initial assignment with age=$age, isDisabled=$isDisabled")
+                Log.d(TAG, "Requesting initial assignment with age=$age, isDisabled=$isDisabled, floorId=$floorId, currentFloor=${currentFloor?.name}")
 
                 // Request assignment from backend
                 val assignmentResponse = apiService.requestUserAssignment(age, isDisabled)
@@ -1597,16 +1695,18 @@ class MainActivity : AppCompatActivity() {
                 val assignment = if (assignmentResponse != null) {
                     // Capture the visitor ID from the response
                     visitorId = assignmentResponse.visitorId
-                    Log.d(TAG, "Visitor ID captured from assignment: $visitorId")
+                    Log.d(TAG, "Visitor ID captured from initial assignment: $visitorId, level=${assignmentResponse.level}")
                     
                     // Convert response to UserAssignment
-                    UserAssignment(
+                    val userAssignment = UserAssignment(
                         age = assignmentResponse.decision.age,
                         isDisabled = assignmentResponse.decision.isDisabled,
                         level = assignmentResponse.level,
                         floorId = floorId,
                         floorName = currentFloor?.name
                     )
+                    Log.d(TAG, "Created initial UserAssignment: age=${userAssignment.age}, isDisabled=${userAssignment.isDisabled}, level=${userAssignment.level}, floorId=${userAssignment.floorId}, floorName=${userAssignment.floorName}")
+                    userAssignment
                 } else {
                     // Fallback: Generate assignment locally if backend doesn't support it
                     Log.d(TAG, "Backend assignment not available, generating locally")
@@ -1629,6 +1729,7 @@ class MainActivity : AppCompatActivity() {
         val floorId = currentFloor?.id
 
         if (floorId == null) {
+            Log.w(TAG, "Cannot request assignment: currentFloor is null. floors.size=${floors.size}")
             Toast.makeText(this, "No floor selected", Toast.LENGTH_SHORT).show()
             return
         }
@@ -1639,7 +1740,7 @@ class MainActivity : AppCompatActivity() {
                 val age = (18..90).random()
                 val isDisabled = Math.random() < 0.20
 
-                Log.d(TAG, "Requesting new assignment with age=$age, isDisabled=$isDisabled")
+                Log.d(TAG, "Requesting new assignment with age=$age, isDisabled=$isDisabled, floorId=$floorId, currentFloor=${currentFloor?.name}")
 
                 // Request new assignment from backend
                 val assignmentResponse = apiService.requestUserAssignment(age, isDisabled)
@@ -1647,17 +1748,19 @@ class MainActivity : AppCompatActivity() {
                 val assignment = if (assignmentResponse != null) {
                     // Capture the visitor ID from the response
                     visitorId = assignmentResponse.visitorId
-                    Log.d(TAG, "Visitor ID captured from new assignment: $visitorId")
+                    Log.d(TAG, "Visitor ID captured from new assignment: $visitorId, level=${assignmentResponse.level}")
                     Toast.makeText(this@MainActivity, "New visitor ID: $visitorId", Toast.LENGTH_SHORT).show()
                     
                     // Convert response to UserAssignment
-                    UserAssignment(
+                    val userAssignment = UserAssignment(
                         age = assignmentResponse.decision.age,
                         isDisabled = assignmentResponse.decision.isDisabled,
                         level = assignmentResponse.level,
                         floorId = floorId,
                         floorName = currentFloor?.name
                     )
+                    Log.d(TAG, "Created UserAssignment: age=${userAssignment.age}, isDisabled=${userAssignment.isDisabled}, level=${userAssignment.level}, floorId=${userAssignment.floorId}, floorName=${userAssignment.floorName}")
+                    userAssignment
                 } else {
                     // Fallback: Generate assignment locally if backend doesn't support it
                     Log.d(TAG, "Backend assignment not available, generating locally")
@@ -1700,7 +1803,26 @@ class MainActivity : AppCompatActivity() {
      */
     private fun displayAssignment(assignment: UserAssignment) {
         try {
-            val floorNumber = currentFloor?.floorNumber ?: 0
+            Log.d(TAG, "displayAssignment called: floorId=${assignment.floorId}, level=${assignment.level}, age=${assignment.age}, isDisabled=${assignment.isDisabled}")
+            Log.d(TAG, "Current floor: id=${currentFloor?.id}, number=${currentFloor?.floorNumber}, name=${currentFloor?.name}")
+            Log.d(TAG, "Available floors: ${floors.map { "id=${it.id}, num=${it.floorNumber}, name=${it.name}" }}")
+            
+            // Look up the floor number from the assignment's floorId
+            val floorNumber = if (assignment.floorId != null) {
+                val floor = floors.find { it.id == assignment.floorId }
+                if (floor != null) {
+                    Log.d(TAG, "Found floor for assignment: floorId=${assignment.floorId}, floorNumber=${floor.floorNumber}, name=${floor.name}")
+                    floor.floorNumber
+                } else {
+                    Log.e(TAG, "CRITICAL: No floor found with id=${assignment.floorId}. Available floors: ${floors.map { "id=${it.id}, number=${it.floorNumber}" }}")
+                    Log.e(TAG, "Falling back to currentFloor?.floorNumber: ${currentFloor?.floorNumber}")
+                    currentFloor?.floorNumber ?: 1 // Default to 1 instead of 0
+                }
+            } else {
+                Log.e(TAG, "CRITICAL: Assignment has no floorId! Using currentFloor: id=${currentFloor?.id}, number=${currentFloor?.floorNumber}")
+                currentFloor?.floorNumber ?: 1 // Default to 1 instead of 0
+            }
+            
             val healthEmoji = assignment.getHealthStatusEmoji()
 
             // Compact format: 🚶 F2 | 45 | ✅
@@ -1712,7 +1834,7 @@ class MainActivity : AppCompatActivity() {
             assignmentInfoText.text = infoText
             assignmentInfoContainer.visibility = View.VISIBLE
 
-            Log.d(TAG, "Assignment displayed: $infoText")
+            Log.d(TAG, "Assignment displayed: $infoText (floorId=${assignment.floorId}, level=${assignment.level}, accessibilityLevel=${assignment.level})")
 
             // Draw path to nearest node with correct accessibility level
             drawPathToAccessibilityLevel(assignment)
@@ -1860,11 +1982,24 @@ class MainActivity : AppCompatActivity() {
         val qrImageView = dialog.findViewById<ImageView>(R.id.qrCodeImageView)
         val visitorIdText = dialog.findViewById<TextView>(R.id.visitorIdText)
         val urlText = dialog.findViewById<TextView>(R.id.qrCodeUrlText)
+        val openBrowserButton = dialog.findViewById<Button>(R.id.openBrowserButton)
         val closeButton = dialog.findViewById<Button>(R.id.closeButton)
 
         qrImageView.setImageBitmap(qrBitmap)
         visitorIdText.text = "Visitor ID: $currentVisitorId"
         urlText.text = "Scan to view visitor information"
+
+        openBrowserButton.setOnClickListener {
+            // Open URL in browser
+            try {
+                val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(visitorUrl))
+                startActivity(browserIntent)
+                Log.d(TAG, "Opening visitor page in browser: $visitorUrl")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error opening browser", e)
+                Toast.makeText(this, "Could not open browser", Toast.LENGTH_SHORT).show()
+            }
+        }
 
         closeButton.setOnClickListener {
             dialog.dismiss()

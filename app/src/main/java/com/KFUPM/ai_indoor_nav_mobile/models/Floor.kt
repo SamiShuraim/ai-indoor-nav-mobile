@@ -6,19 +6,19 @@ data class Floor(
     @SerializedName("id")
     val id: Int,
     
-    @SerializedName("building_id")
+    @SerializedName("buildingId")
     val buildingId: Int,
     
     @SerializedName("name")
     val name: String,
     
-    @SerializedName("floor_number")
-    val floorNumber: Int,
+    @SerializedName("floorNumber")
+    private val _floorNumber: Int,
     
-    @SerializedName("created_at")
+    @SerializedName("createdAt")
     val createdAt: String? = null,
     
-    @SerializedName("updated_at")
+    @SerializedName("updatedAt")
     val updatedAt: String? = null,
     
     @SerializedName("pois")
@@ -29,4 +29,11 @@ data class Floor(
     
     @SerializedName("routeNodes")
     val routeNodes: List<RouteNode>? = null
-)
+) {
+    /**
+     * Display floor number (adds 1 to 0-indexed backend value)
+     * Backend: 0, 1, 2 -> Display: 1, 2, 3
+     */
+    val floorNumber: Int
+        get() = _floorNumber + 1
+}
