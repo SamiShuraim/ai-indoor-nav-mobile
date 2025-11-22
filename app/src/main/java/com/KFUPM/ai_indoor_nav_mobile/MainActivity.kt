@@ -1585,28 +1585,33 @@ class MainActivity : AppCompatActivity() {
     private fun requestInitialAssignment(floorId: Int) {
         lifecycleScope.launch {
             try {
-                // Get current position from localization
-                val position = localizationController.getCurrentPosition()
+                // Generate random age and disability status
+                val age = (18..90).random()
+                val isDisabled = Math.random() < 0.20
 
-                if (position != null) {
-                    val (x, y) = position
-                    Log.d(TAG, "Requesting initial assignment at position ($x, $y)")
+                Log.d(TAG, "Requesting initial assignment with age=$age, isDisabled=$isDisabled")
 
-                    // Request assignment from backend
-                    var assignment = apiService.requestUserAssignment(floorId, x, y)
+                // Request assignment from backend
+                val assignmentResponse = apiService.requestUserAssignment(age, isDisabled)
 
-                    // Fallback: Generate assignment locally if backend doesn't support it
-                    if (assignment == null) {
-                        Log.d(TAG, "Backend assignment not available, generating locally")
-                        assignment = generateLocalAssignment(floorId)
-                    }
-
-                    currentAssignment = assignment
-                    displayAssignment(assignment)
-                    Log.d(TAG, "Initial assignment received: age=${assignment.age}, disabled=${assignment.isDisabled}")
+                val assignment = if (assignmentResponse != null) {
+                    // Convert response to UserAssignment
+                    UserAssignment(
+                        age = assignmentResponse.decision.age,
+                        isDisabled = assignmentResponse.decision.isDisabled,
+                        level = assignmentResponse.level,
+                        floorId = floorId,
+                        floorName = currentFloor?.name
+                    )
                 } else {
-                    Log.w(TAG, "Position not available for initial assignment")
+                    // Fallback: Generate assignment locally if backend doesn't support it
+                    Log.d(TAG, "Backend assignment not available, generating locally")
+                    generateLocalAssignment(floorId)
                 }
+
+                currentAssignment = assignment
+                displayAssignment(assignment)
+                Log.d(TAG, "Initial assignment received: age=${assignment.age}, disabled=${assignment.isDisabled}, level=${assignment.level}")
             } catch (e: Exception) {
                 Log.e(TAG, "Error requesting initial assignment", e)
             }
@@ -1626,29 +1631,34 @@ class MainActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             try {
-                // Get current position from localization
-                val position = localizationController.getCurrentPosition()
+                // Generate random age and disability status
+                val age = (18..90).random()
+                val isDisabled = Math.random() < 0.20
 
-                if (position != null) {
-                    val (x, y) = position
-                    Log.d(TAG, "Requesting new assignment at position ($x, $y)")
+                Log.d(TAG, "Requesting new assignment with age=$age, isDisabled=$isDisabled")
 
-                    // Request new assignment from backend
-                    var assignment = apiService.requestUserAssignment(floorId, x, y)
+                // Request new assignment from backend
+                val assignmentResponse = apiService.requestUserAssignment(age, isDisabled)
 
-                    // Fallback: Generate assignment locally if backend doesn't support it
-                    if (assignment == null) {
-                        Log.d(TAG, "Backend assignment not available, generating locally")
-                        assignment = generateLocalAssignment(floorId)
-                    }
-
-                    currentAssignment = assignment
-                    displayAssignment(assignment)
-                    Toast.makeText(this@MainActivity, "New assignment received", Toast.LENGTH_SHORT).show()
-                    Log.d(TAG, "New assignment received: age=${assignment.age}, disabled=${assignment.isDisabled}")
+                val assignment = if (assignmentResponse != null) {
+                    // Convert response to UserAssignment
+                    UserAssignment(
+                        age = assignmentResponse.decision.age,
+                        isDisabled = assignmentResponse.decision.isDisabled,
+                        level = assignmentResponse.level,
+                        floorId = floorId,
+                        floorName = currentFloor?.name
+                    )
                 } else {
-                    Toast.makeText(this@MainActivity, "Position not available", Toast.LENGTH_SHORT).show()
+                    // Fallback: Generate assignment locally if backend doesn't support it
+                    Log.d(TAG, "Backend assignment not available, generating locally")
+                    generateLocalAssignment(floorId)
                 }
+
+                currentAssignment = assignment
+                displayAssignment(assignment)
+                Toast.makeText(this@MainActivity, "New assignment received", Toast.LENGTH_SHORT).show()
+                Log.d(TAG, "New assignment received: age=${assignment.age}, disabled=${assignment.isDisabled}, level=${assignment.level}")
             } catch (e: Exception) {
                 Log.e(TAG, "Error requesting new assignment", e)
                 Toast.makeText(this@MainActivity, "Assignment error: ${e.message}", Toast.LENGTH_SHORT).show()

@@ -377,35 +377,15 @@ class ApiService {
     }
 
     /**
-     * Request user assignment from backend (Load Balancer format)
+     * Request user assignment from backend (Load Balancer)
      */
-    suspend fun requestUserAssignment(
-        level: Int, 
-        visitorId: String, 
-        age: Int, 
-        isDisabled: Boolean
-    ): UserAssignment? {
+    suspend fun requestUserAssignment(age: Int, isDisabled: Boolean): AssignmentResponse? {
         return withContext(Dispatchers.IO) {
             try {
-                // Create the decision object
-                val decision = AssignmentDecision(
-                    isDisabled = isDisabled,
+                // Create simple assignment request
+                val assignmentRequest = AssignmentRequestSimple(
                     age = age,
-                    ageCutoff = null,  // Backend will use defaults
-                    alpha1 = null,
-                    pDisabled = null,
-                    shareLeftForOld = null,
-                    tauQuantile = null,
-                    occupancy = null,
-                    reason = null
-                )
-
-                // Create the assignment request
-                val assignmentRequest = AssignmentRequest(
-                    level = level,
-                    visitorId = visitorId,
-                    decision = decision,
-                    traceId = null  // Optional trace ID
+                    isDisabled = isDisabled
                 )
 
                 val requestBody = RequestBody.create(
@@ -425,18 +405,18 @@ class ApiService {
                     if (response.isSuccessful) {
                         val jsonString = response.body?.string()
                         if (jsonString != null) {
-                            Log.d(TAG, "User assignment response: $jsonString")
-                            gson.fromJson(jsonString, UserAssignment::class.java)
+                            Log.d(TAG, "Assignment response: $jsonString")
+                            gson.fromJson(jsonString, AssignmentResponse::class.java)
                         } else null
                     } else {
                         val errorBody = response.body?.string()
-                        Log.e(TAG, "Failed to request user assignment: ${response.code} - ${response.message}")
+                        Log.e(TAG, "Failed to request assignment: ${response.code} - ${response.message}")
                         Log.e(TAG, "Error body: $errorBody")
                         null
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error requesting user assignment", e)
+                Log.e(TAG, "Error requesting assignment", e)
                 null
             }
         }
