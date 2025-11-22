@@ -50,6 +50,14 @@ import com.google.zxing.WriterException
 
 class MainActivity : AppCompatActivity() {
 
+    // Helper class for parallel API calls
+    private data class Quadruple<A, B, C, D>(
+        val first: A,
+        val second: B,
+        val third: C,
+        val fourth: D
+    )
+
     private lateinit var mapView: MapView
     private lateinit var mapLibreMap: MapLibreMap
     private lateinit var fabAssignment: FloatingActionButton
@@ -252,13 +260,15 @@ class MainActivity : AppCompatActivity() {
             Log.d(TAG, "Loading node-to-floor mappings for all floors...")
             
             // Load route nodes for each floor in parallel
-            val allRouteNodes = floors.map { floor ->
-                async { 
-                    apiService.getRouteNodesByFloor(floor.id)?.also { nodes ->
-                        Log.d(TAG, "Loaded ${nodes.size} nodes for floor ${floor.name}")
+            val allRouteNodes = coroutineScope {
+                floors.map { floor ->
+                    async { 
+                        apiService.getRouteNodesByFloor(floor.id)?.also { nodes ->
+                            Log.d(TAG, "Loaded ${nodes.size} nodes for floor ${floor.name}")
+                        }
                     }
-                }
-            }.awaitAll().filterNotNull().flatten()
+                }.awaitAll().filterNotNull().flatten()
+            }
             
             // Populate the mapping
             allRouteNodes.forEach { node ->
@@ -355,15 +365,25 @@ class MainActivity : AppCompatActivity() {
                 Log.d(TAG, "Loading GeoJSON data for floor: ${floor.name}")
                 
                 // Fetch all GeoJSON data for the floor in parallel
-                val poisDeferred = async { apiService.getPOIsByFloorAsGeoJSON(floor.id) }
-                val beaconsDeferred = async { apiService.getBeaconsByFloorAsGeoJSON(floor.id) }
-                val routeNodesDeferred = async { apiService.getRouteNodesByFloorAsGeoJSON(floor.id) }
-                val routeNodesListDeferred = async { apiService.getRouteNodesByFloor(floor.id) }
+                val results = coroutineScope {
+                    val poisDeferred = async { apiService.getPOIsByFloorAsGeoJSON(floor.id) }
+                    val beaconsDeferred = async { apiService.getBeaconsByFloorAsGeoJSON(floor.id) }
+                    val routeNodesDeferred = async { apiService.getRouteNodesByFloorAsGeoJSON(floor.id) }
+                    val routeNodesListDeferred = async { apiService.getRouteNodesByFloor(floor.id) }
+                    
+                    // Await all results and return as quadruple
+                    Quadruple(
+                        poisDeferred.await(),
+                        beaconsDeferred.await(),
+                        routeNodesDeferred.await(),
+                        routeNodesListDeferred.await()
+                    )
+                }
                 
-                val poisGeoJSON = poisDeferred.await()
-                val beaconsGeoJSON = beaconsDeferred.await()
-                val routeNodesGeoJSON = routeNodesDeferred.await()
-                val routeNodesList = routeNodesListDeferred.await()
+                val poisGeoJSON = results.first
+                val beaconsGeoJSON = results.second
+                val routeNodesGeoJSON = results.third
+                val routeNodesList = results.fourth
                 
                 // Update node-to-floor mapping for automatic floor switching
                 routeNodesList?.forEach { node ->
