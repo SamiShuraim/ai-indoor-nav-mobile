@@ -372,11 +372,6 @@ class MainActivity : AppCompatActivity() {
     private fun onFloorSelected(floor: Floor) {
         Log.d(TAG, "Floor selected: ${floor.name} (id: ${floor.id})")
         selectFloor(floor)
-        
-        // Redraw path for the new floor if navigation is active
-        if (currentNavigationPath != null) {
-            redrawPathWithProgress()
-        }
     }
 
     /**
@@ -391,6 +386,7 @@ class MainActivity : AppCompatActivity() {
         // Reset assignment flag when changing floors
         hasRequestedInitialAssignment = false
 
+        // Redraw path if navigation is active (after floor data loads)
         lifecycleScope.launch {
             try {
                 Log.d(TAG, "Loading GeoJSON data for floor: ${floor.name}")
@@ -424,6 +420,11 @@ class MainActivity : AppCompatActivity() {
                 
                 // Initialize localization for this floor
                 initializeLocalization(floor.id)
+                
+                // Redraw navigation path for the new floor if navigation is active
+                if (currentNavigationPath != null) {
+                    redrawPathWithProgress()
+                }
                 
                 // Auto-click assignment button after first floor is fully loaded (only once at startup)
                 if (!hasAutoClickedAssignment) {
@@ -1434,6 +1435,9 @@ class MainActivity : AppCompatActivity() {
         targetNavigationLevel = null
         visitedPathNodeIds.clear()
         
+        // Clear the user current floor indicator from floor selector
+        floorSelectorAdapter.setUserCurrentFloor(-1)
+        
         Toast.makeText(this, "Navigation path cleared", Toast.LENGTH_SHORT).show()
         Log.d(TAG, "Navigation path cleared")
     }
@@ -1923,26 +1927,32 @@ class MainActivity : AppCompatActivity() {
                     // Update navigation path progress
                     updateNavigationProgress(nodeId)
                     
-                    // Check for automatic floor switching
-                    if (nodeId != null && confidence > 0.6) { // Only switch if we're confident
+                    // Update floor selector to show current physical floor indicator
+                    if (nodeId != null && confidence > 0.6) {
                         val detectedFloorId = nodeToFloorMap[nodeId]
-                        val currentFloorId = currentFloor?.id
-                        
-                        if (detectedFloorId != null && currentFloorId != null && detectedFloorId != currentFloorId) {
-                            Log.d(TAG, "Floor change detected: current=$currentFloorId, detected=$detectedFloorId")
+                        if (detectedFloorId != null) {
+                            withContext(Dispatchers.Main) {
+                                floorSelectorAdapter.setUserCurrentFloor(detectedFloorId)
+                            }
                             
-                            // Find the floor to switch to
-                            val targetFloor = floors.find { it.id == detectedFloorId }
-                            if (targetFloor != null) {
-                                Log.d(TAG, "Auto-switching to floor: ${targetFloor.name}")
-                                withContext(Dispatchers.Main) {
-                                    // Simulate floor button click
-                                    onFloorSelected(targetFloor)
-                                    Toast.makeText(
-                                        this@MainActivity, 
-                                        "Auto-switched to ${targetFloor.name}", 
-                                        Toast.LENGTH_SHORT
-                                    ).show()
+                            // Auto-switch ONLY if user is navigating AND is on wrong floor display
+                            val currentFloorId = currentFloor?.id
+                            if (currentNavigationPath != null && currentFloorId != null && detectedFloorId != currentFloorId) {
+                                Log.d(TAG, "User physically on different floor: current view=$currentFloorId, actual=$detectedFloorId")
+                                
+                                // Find the floor to switch to
+                                val targetFloor = floors.find { it.id == detectedFloorId }
+                                if (targetFloor != null) {
+                                    Log.d(TAG, "Auto-switching to floor: ${targetFloor.name}")
+                                    withContext(Dispatchers.Main) {
+                                        // Simulate floor button click
+                                        onFloorSelected(targetFloor)
+                                        Toast.makeText(
+                                            this@MainActivity, 
+                                            "📍 You're now on ${targetFloor.name}", 
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
                                 }
                             }
                         }
