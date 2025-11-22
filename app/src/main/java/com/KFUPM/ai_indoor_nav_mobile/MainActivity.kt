@@ -59,7 +59,7 @@ class MainActivity : AppCompatActivity() {
     private var isLocalizationActive = false
     private var currentAssignment: UserAssignment? = null
     private var hasRequestedInitialAssignment = false
-    
+
     // Data
     private var currentBuilding: Building? = null
     private var floors: List<Floor> = emptyList()
@@ -91,20 +91,7 @@ class MainActivity : AppCompatActivity() {
         private const val TAG = "MainActivity"
     }
 
-    
-    private val poiSearchLauncher = 
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            if (result.resultCode == Activity.RESULT_OK) {
-                val data = result.data
-                val poiId = data?.getIntExtra("poi_id", -1)
-                val poiName = data?.getStringExtra("poi_name")
-                
-                if (poiId != null && poiId != -1 && poiName != null) {
-                    Log.d(TAG, "POI selected: $poiName (ID: $poiId)")
-                    handleNavigationToPOI(poiId, poiName)
-                }
-            }
-        }
+
 
     private val poiSearchLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -142,7 +129,7 @@ class MainActivity : AppCompatActivity() {
         
         // Initialize localization controller
         localizationController = LocalizationController(this)
-        
+
         setupFloorSelector()
         mapView.onCreate(savedInstanceState)
         setupButtonListeners()
@@ -302,7 +289,7 @@ class MainActivity : AppCompatActivity() {
                 
                 // Initialize localization for this floor
                 initializeLocalization(floor.id)
-                
+
             } catch (e: Exception) {
                 Log.e(TAG, "Error loading floor data", e)
             }
@@ -1373,36 +1360,36 @@ class MainActivity : AppCompatActivity() {
             Log.w(TAG, "Bluetooth permissions not granted, cannot start localization")
             return
         }
-        
+
         lifecycleScope.launch {
             try {
                 Log.d(TAG, "Initializing localization for floor $floorId...")
-                
+
                 // Stop any existing localization
                 if (isLocalizationActive) {
                     localizationController.stop()
                     isLocalizationActive = false
                 }
-                
+
                 // Try auto-initialization first (determines position automatically)
                 val success = localizationController.autoInitialize(
                     availableFloorIds = listOf(floorId),
                     scanDurationMs = 5000 // 5 seconds
                 )
-                
+
                 if (success) {
                     // Start continuous localization
                     localizationController.start()
                     isLocalizationActive = true
-                    
+
                     // Observe position updates (assignment will be requested once position is found)
                     observeLocalizationUpdates()
-                    
+
                     Log.d(TAG, "Localization started successfully")
                     Toast.makeText(this@MainActivity, "Indoor positioning active", Toast.LENGTH_SHORT).show()
                 } else {
                     Log.w(TAG, "Auto-initialization failed, trying manual initialization...")
-                    
+
                     // Fallback: manual initialization without specific starting position
                     val manualSuccess = localizationController.initialize(floorId, null)
                     if (manualSuccess) {
@@ -1417,13 +1404,13 @@ class MainActivity : AppCompatActivity() {
                         Log.e(TAG, "Failed to initialize localization")
                     }
                 }
-                
+
             } catch (e: Exception) {
                 Log.e(TAG, "Error initializing localization", e)
             }
         }
     }
-    
+
     /**
      * Observe localization state updates and update the blue dot
      */
@@ -1432,14 +1419,14 @@ class MainActivity : AppCompatActivity() {
             localizationController.localizationState.collect { state ->
                 val nodeId = state.currentNodeId
                 val confidence = state.confidence
-                
+
                 // Get position coordinates
                 val position = localizationController.getCurrentPosition()
-                
+
                 if (position != null) {
                     val (x, y) = position
                     Log.d(TAG, "Localization: node=$nodeId, pos=($x, $y), confidence=${String.format("%.2f", confidence)}")
-                    
+
                     // Update blue dot on map
                     updateLocalizationMarker(x, y, confidence)
                     
@@ -1455,7 +1442,7 @@ class MainActivity : AppCompatActivity() {
                     // Clear marker if no position
                     clearLocalizationMarker()
                 }
-                
+
                 // Log debug info
                 state.debug?.let { debug ->
                     Log.d(TAG, "Beacons visible: ${debug.visibleBeaconCount}")
@@ -1466,7 +1453,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
-    
+
     /**
      * Update the localization marker (blue dot) on the map
      */
@@ -1475,15 +1462,15 @@ class MainActivity : AppCompatActivity() {
         if (style == null || !style.isFullyLoaded) {
             return
         }
-        
+
         try {
             // Create point feature for the marker
             val point = Point.fromLngLat(x, y)
             val feature = Feature.fromGeometry(point)
             feature.addNumberProperty("confidence", confidence)
-            
+
             val featureCollection = FeatureCollection.fromFeature(feature)
-            
+
             // Add or update source
             var source = style.getSource(localizationMarkerSourceId) as? GeoJsonSource
             if (source != null) {
@@ -1491,7 +1478,7 @@ class MainActivity : AppCompatActivity() {
             } else {
                 source = GeoJsonSource(localizationMarkerSourceId, featureCollection)
                 style.addSource(source)
-                
+
                 // Add inner circle layer (blue dot)
                 if (style.getLayer(localizationMarkerLayerId) == null) {
                     val markerLayer = CircleLayer(localizationMarkerLayerId, localizationMarkerSourceId)
@@ -1502,7 +1489,7 @@ class MainActivity : AppCompatActivity() {
                         )
                     style.addLayer(markerLayer)
                 }
-                
+
                 // Add outer stroke layer
                 if (style.getLayer(localizationMarkerStrokeLayerId) == null) {
                     val strokeLayer = CircleLayer(localizationMarkerStrokeLayerId, localizationMarkerSourceId)
@@ -1517,12 +1504,12 @@ class MainActivity : AppCompatActivity() {
                     style.addLayerBelow(strokeLayer, localizationMarkerLayerId)
                 }
             }
-            
+
         } catch (e: Exception) {
             Log.e(TAG, "Error updating localization marker", e)
         }
     }
-    
+
     /**
      * Clear the localization marker from the map
      */
@@ -1531,7 +1518,7 @@ class MainActivity : AppCompatActivity() {
         if (style == null || !style.isFullyLoaded) {
             return
         }
-        
+
         try {
             style.getLayer(localizationMarkerLayerId)?.let { style.removeLayer(localizationMarkerLayerId) }
             style.getLayer(localizationMarkerStrokeLayerId)?.let { style.removeLayer(localizationMarkerStrokeLayerId) }
@@ -1745,7 +1732,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
-    
+
     /**
      * Check if Bluetooth permissions are granted
      * Note: ACCESS_FINE_LOCATION is required for Bluetooth scanning on Android 11 and below
@@ -1754,13 +1741,13 @@ class MainActivity : AppCompatActivity() {
     private fun hasBluetoothPermissions(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             // Android 12+: Use dedicated Bluetooth permissions
-            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == 
+            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) ==
                 PackageManager.PERMISSION_GRANTED &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == 
+            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) ==
                 PackageManager.PERMISSION_GRANTED
         } else {
             // Android 11 and below: ACCESS_FINE_LOCATION required for Bluetooth scanning
-            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == 
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
                 PackageManager.PERMISSION_GRANTED
         }
     }
@@ -1772,13 +1759,13 @@ class MainActivity : AppCompatActivity() {
     override fun onLowMemory() { super.onLowMemory(); mapView.onLowMemory() }
     override fun onDestroy() {
         super.onDestroy()
-        
+
         // Stop and cleanup localization
         if (isLocalizationActive) {
             localizationController.stop()
         }
         localizationController.cleanup()
-        
+
         mapView.onDestroy()
         apiService.cleanup()
     }
