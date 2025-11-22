@@ -365,6 +365,11 @@ class MainActivity : AppCompatActivity() {
     private fun onFloorSelected(floor: Floor) {
         Log.d(TAG, "Floor selected: ${floor.name} (id: ${floor.id})")
         selectFloor(floor)
+        
+        // Redraw path for the new floor if navigation is active
+        if (currentNavigationPath != null) {
+            redrawPathWithProgress()
+        }
     }
 
     /**
@@ -1395,62 +1400,8 @@ class MainActivity : AppCompatActivity() {
             targetNavigationLevel = targetLevel
             visitedPathNodeIds.clear()
             
-            // Clear existing path layers
-            clearPathLayers(style)
-            
-            val features = pathFeatureCollection.features() ?: return
-            if (features.isEmpty()) {
-                Log.w(TAG, "No path features to display")
-                return
-            }
-            
-            // Separate path nodes and path edges
-            val pathNodes = mutableListOf<Feature>()
-            val pathEdges = mutableListOf<Feature>()
-            
-            features.forEach { feature ->
-                val isPathNode = feature.getBooleanProperty("is_path_node") ?: false
-                val isPathEdge = feature.getBooleanProperty("is_path_edge") ?: false
-                
-                when {
-                    isPathNode -> pathNodes.add(feature)
-                    isPathEdge -> pathEdges.add(feature)
-                }
-            }
-            
-            Log.d(TAG, "Path contains ${pathNodes.size} nodes and ${pathEdges.size} edges")
-            
-            // Add path edges (lines) with distinct color
-            if (pathEdges.isNotEmpty()) {
-                val pathEdgesCollection = FeatureCollection.fromFeatures(pathEdges)
-                val pathEdgesSource = GeoJsonSource(pathEdgesSourceId, pathEdgesCollection)
-                style.addSource(pathEdgesSource)
-                
-                val pathEdgesLayer = LineLayer(pathEdgesLayerId, pathEdgesSourceId)
-                    .withProperties(
-                        lineColor("#FF6B35"), // Orange-red color for path
-                        lineWidth(6f),
-                        lineOpacity(0.8f)
-                    )
-                style.addLayer(pathEdgesLayer)
-            }
-            
-            // Add path nodes with distinct color
-            if (pathNodes.isNotEmpty()) {
-                val pathNodesCollection = FeatureCollection.fromFeatures(pathNodes)
-                val pathNodesSource = GeoJsonSource(pathNodesSourceId, pathNodesCollection)
-                style.addSource(pathNodesSource)
-                
-                val pathNodesLayer = CircleLayer(pathNodesLayerId, pathNodesSourceId)
-                    .withProperties(
-                        circleRadius(8f),
-                        circleColor("#FF6B35"), // Orange-red color for path nodes
-                        circleStrokeColor("#FFFFFF"),
-                        circleStrokeWidth(2f),
-                        circleOpacity(0.9f)
-                    )
-                style.addLayer(pathNodesLayer)
-            }
+            // Redraw with filtering for current floor
+            redrawPathWithProgress()
             
             Log.d(TAG, "Navigation path displayed successfully")
             
@@ -1590,7 +1541,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Redraw the path with visited nodes shown in gray
+     * Redraw the path with visited nodes shown in gray, filtered by current floor
      */
     private fun redrawPathWithProgress() {
         val style = mapLibreMap.style
@@ -1600,8 +1551,14 @@ class MainActivity : AppCompatActivity() {
 
         try {
             val features = currentNavigationPath?.features() ?: return
+            val currentFloorId = currentFloor?.id
 
-            // Separate into past and future nodes/edges
+            if (currentFloorId == null) {
+                Log.w(TAG, "Cannot redraw path: no current floor")
+                return
+            }
+
+            // Separate into past and future nodes/edges, filtered by current floor
             val pastNodes = mutableListOf<Feature>()
             val futureNodes = mutableListOf<Feature>()
             val pastEdges = mutableListOf<Feature>()
@@ -1612,26 +1569,40 @@ class MainActivity : AppCompatActivity() {
                 val isPathEdge = feature.getBooleanProperty("is_path_edge") ?: false
 
                 if (isPathNode) {
-                    // Check if this node has been visited
+                    // Check if this node is on the current floor
                     val nodeIdStr = feature.getStringProperty("id")
                     val nodeId = nodeIdStr?.toIntOrNull()
                     
-                    if (nodeId != null && visitedPathNodeIds.contains(nodeId)) {
-                        pastNodes.add(feature)
-                    } else {
-                        futureNodes.add(feature)
+                    if (nodeId != null) {
+                        val nodeFloorId = nodeToFloorMap[nodeId.toString()]
+                        
+                        // Only add node if it's on the current floor
+                        if (nodeFloorId == currentFloorId) {
+                            if (visitedPathNodeIds.contains(nodeId)) {
+                                pastNodes.add(feature)
+                            } else {
+                                futureNodes.add(feature)
+                            }
+                        }
                     }
                 } else if (isPathEdge) {
-                    // Check if both nodes of this edge have been visited
+                    // Check if both nodes of this edge are on the current floor
                     val fromNodeId = feature.getNumberProperty("from_node_id")?.toInt()
                     val toNodeId = feature.getNumberProperty("to_node_id")?.toInt()
                     
-                    if (fromNodeId != null && toNodeId != null &&
-                        visitedPathNodeIds.contains(fromNodeId) && 
-                        visitedPathNodeIds.contains(toNodeId)) {
-                        pastEdges.add(feature)
-                    } else {
-                        futureEdges.add(feature)
+                    if (fromNodeId != null && toNodeId != null) {
+                        val fromFloorId = nodeToFloorMap[fromNodeId.toString()]
+                        val toFloorId = nodeToFloorMap[toNodeId.toString()]
+                        
+                        // Only add edge if both nodes are on the current floor
+                        if (fromFloorId == currentFloorId && toFloorId == currentFloorId) {
+                            if (visitedPathNodeIds.contains(fromNodeId) && 
+                                visitedPathNodeIds.contains(toNodeId)) {
+                                pastEdges.add(feature)
+                            } else {
+                                futureEdges.add(feature)
+                            }
+                        }
                     }
                 }
             }
@@ -1703,7 +1674,7 @@ class MainActivity : AppCompatActivity() {
                 style.addLayer(futureNodesLayer)
             }
 
-            Log.d(TAG, "Path redrawn: ${pastNodes.size} visited nodes, ${futureNodes.size} remaining nodes")
+            Log.d(TAG, "Path redrawn for floor ${currentFloor?.name}: ${pastNodes.size} visited nodes, ${futureNodes.size} remaining nodes on this floor")
 
         } catch (e: Exception) {
             Log.e(TAG, "Error redrawing path with progress", e)
