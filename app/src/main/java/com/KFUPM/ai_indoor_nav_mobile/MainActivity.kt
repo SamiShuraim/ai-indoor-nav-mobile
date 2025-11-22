@@ -2,12 +2,19 @@ package com.KFUPM.ai_indoor_nav_mobile
 
 import android.Manifest
 import android.app.Activity
+import android.app.Dialog
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Color
 import android.os.Bundle
 import android.util.Log
 import android.view.View
+import android.view.Window
+import android.widget.Button
+import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -38,6 +45,9 @@ import java.io.IOException
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.KFUPM.ai_indoor_nav_mobile.localization.LocalizationController
 import android.os.Build
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
+import com.google.zxing.WriterException
 
 class MainActivity : AppCompatActivity() {
 
@@ -46,6 +56,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var fabBluetooth: FloatingActionButton
     private lateinit var fabSearch: FloatingActionButton
     private lateinit var fabClearPath: FloatingActionButton
+    private lateinit var fabQrCode: FloatingActionButton
     private lateinit var floorSelectorContainer: LinearLayout
     private lateinit var floorRecyclerView: RecyclerView
     private lateinit var floorSelectorAdapter: FloorSelectorAdapter
@@ -136,6 +147,7 @@ class MainActivity : AppCompatActivity() {
         fabBluetooth = findViewById(R.id.fabBluetooth)
         fabSearch = findViewById(R.id.fabSearch)
         fabClearPath = findViewById(R.id.fabClearPath)
+        fabQrCode = findViewById(R.id.fabQrCode)
         floorSelectorContainer = findViewById(R.id.floorSelectorContainer)
         floorRecyclerView = findViewById(R.id.floorRecyclerView)
         
@@ -187,7 +199,10 @@ class MainActivity : AppCompatActivity() {
         
         fabClearPath.setOnClickListener {
             clearPath()
-
+        }
+        
+        fabQrCode.setOnClickListener {
+            showQrCodeDialog()
         }
     }
 
@@ -1557,6 +1572,81 @@ class MainActivity : AppCompatActivity() {
             ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == 
                 PackageManager.PERMISSION_GRANTED
         }
+    }
+    
+    /**
+     * Show QR code dialog for visitor access
+     */
+    private fun showQrCodeDialog() {
+        // Generate or retrieve a visitor ID
+        // For demo purposes, using a sample ID. In production, this should call the API:
+        // GET /api/loadbalancer/arrivals/assign to get a real visitor ID
+        val visitorId = generateDemoVisitorId()
+        val visitorUrl = "${ApiConstants.API_BASE_URL}/api/visitor/$visitorId/page"
+        
+        // Generate QR code bitmap
+        val qrBitmap = generateQrCode(visitorUrl, 800, 800)
+        
+        if (qrBitmap == null) {
+            Toast.makeText(this, "Failed to generate QR code", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        // Create and show dialog
+        val dialog = Dialog(this)
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        dialog.setContentView(R.layout.dialog_qr_code)
+        
+        // Set up dialog views
+        val qrImageView = dialog.findViewById<ImageView>(R.id.qrCodeImageView)
+        val visitorIdText = dialog.findViewById<TextView>(R.id.visitorIdText)
+        val urlText = dialog.findViewById<TextView>(R.id.qrCodeUrlText)
+        val closeButton = dialog.findViewById<Button>(R.id.closeButton)
+        
+        qrImageView.setImageBitmap(qrBitmap)
+        visitorIdText.text = "Visitor ID: $visitorId"
+        urlText.text = "Scan to view visitor information"
+        
+        closeButton.setOnClickListener {
+            dialog.dismiss()
+        }
+        
+        dialog.show()
+        
+        Log.d(TAG, "QR code displayed for visitor ID: $visitorId")
+        Log.d(TAG, "QR code URL: $visitorUrl")
+    }
+    
+    /**
+     * Generate a QR code bitmap from a string
+     */
+    private fun generateQrCode(content: String, width: Int, height: Int): Bitmap? {
+        return try {
+            val qrCodeWriter = QRCodeWriter()
+            val bitMatrix = qrCodeWriter.encode(content, BarcodeFormat.QR_CODE, width, height)
+            
+            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565)
+            for (x in 0 until width) {
+                for (y in 0 until height) {
+                    bitmap.setPixel(x, y, if (bitMatrix[x, y]) Color.BLACK else Color.WHITE)
+                }
+            }
+            bitmap
+        } catch (e: WriterException) {
+            Log.e(TAG, "Error generating QR code", e)
+            null
+        }
+    }
+    
+    /**
+     * Generate a demo visitor ID for testing purposes
+     * In production, this should call the API: GET /api/loadbalancer/arrivals/assign
+     */
+    private fun generateDemoVisitorId(): String {
+        // Generate a random 4-digit code twice, separated by a dash
+        val part1 = (1000..9999).random()
+        val part2 = (1000..9999).random()
+        return "$part1-$part2"
     }
 
     override fun onStart() { super.onStart(); mapView.onStart() }

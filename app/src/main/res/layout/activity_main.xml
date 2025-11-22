@@ -38,6 +38,16 @@
         android:contentDescription="Clear Path"
         android:visibility="gone" />
 
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/fabQrCode"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|start"
+        android:layout_marginStart="16dp"
+        android:layout_marginBottom="80dp"
+        android:src="@drawable/ic_qrcode"
+        android:contentDescription="Show Visitor QR Code" />
+
     <!-- Floor Selector Component -->
     <LinearLayout
         android:id="@+id/floorSelectorContainer"

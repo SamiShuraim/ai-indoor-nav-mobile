@@ -75,6 +75,8 @@ dependencies {
     implementation("androidx.recyclerview:recyclerview:1.3.2")
     // Gson for JSON parsing
     implementation("com.google.code.gson:gson:2.10.1")
+    // ZXing for QR code generation
+    implementation("com.google.zxing:core:3.5.2")
     
     // Testing dependencies
     testImplementation("junit:junit:4.13.2")
