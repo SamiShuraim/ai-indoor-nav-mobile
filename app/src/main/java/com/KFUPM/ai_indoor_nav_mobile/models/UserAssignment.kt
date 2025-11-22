@@ -3,7 +3,35 @@ package com.KFUPM.ai_indoor_nav_mobile.models
 import com.google.gson.annotations.SerializedName
 
 /**
- * User assignment with age and health status
+ * Simple assignment request to backend
+ */
+data class AssignmentRequestSimple(
+    @SerializedName("age")
+    val age: Int,
+    
+    @SerializedName("isDisabled")
+    val isDisabled: Boolean
+)
+
+/**
+ * Assignment response from backend (Load Balancer)
+ */
+data class AssignmentResponse(
+    @SerializedName("level")
+    val level: Int,
+    
+    @SerializedName("visitorId")
+    val visitorId: String,
+    
+    @SerializedName("decision")
+    val decision: AssignmentDecision,
+    
+    @SerializedName("traceId")
+    val traceId: String? = null
+)
+
+/**
+ * User assignment with age and health status (for display)
  */
 data class UserAssignment(
     @SerializedName("age")
@@ -11,6 +39,9 @@ data class UserAssignment(
     
     @SerializedName("isDisabled")
     val isDisabled: Boolean,
+    
+    @SerializedName("level")
+    val level: Int? = null,
     
     @SerializedName("floorId")
     val floorId: Int? = null,
@@ -33,15 +64,37 @@ data class UserAssignment(
     }
 }
 
+
 /**
- * Assignment request to backend
+ * Assignment decision details
  */
-data class AssignmentRequest(
-    @SerializedName("floorId")
-    val floorId: Int,
+data class AssignmentDecision(
+    @SerializedName("isDisabled")
+    val isDisabled: Boolean,
     
-    @SerializedName("position")
-    val position: Position
+    @SerializedName("age")
+    val age: Int,
+    
+    @SerializedName("ageCutoff")
+    val ageCutoff: Int? = null,
+    
+    @SerializedName("alpha1")
+    val alpha1: Double? = null,
+    
+    @SerializedName("pDisabled")
+    val pDisabled: Double? = null,
+    
+    @SerializedName("shareLeftForOld")
+    val shareLeftForOld: Double? = null,
+    
+    @SerializedName("tauQuantile")
+    val tauQuantile: Double? = null,
+    
+    @SerializedName("occupancy")
+    val occupancy: Map<String, Int>? = null,
+    
+    @SerializedName("reason")
+    val reason: String? = null
 )
 
 /**

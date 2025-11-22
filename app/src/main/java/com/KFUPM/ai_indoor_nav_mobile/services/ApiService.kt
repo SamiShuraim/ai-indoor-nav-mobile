@@ -377,20 +377,23 @@ class ApiService {
     }
 
     /**
-     * Request user assignment from backend
+     * Request user assignment from backend (Load Balancer)
      */
-    suspend fun requestUserAssignment(floorId: Int, x: Double, y: Double): UserAssignment? {
+    suspend fun requestUserAssignment(age: Int, isDisabled: Boolean): AssignmentResponse? {
         return withContext(Dispatchers.IO) {
             try {
-                val assignmentRequest = AssignmentRequest(
-                    floorId = floorId,
-                    position = Position(x = x, y = y)
+                // Create simple assignment request
+                val assignmentRequest = AssignmentRequestSimple(
+                    age = age,
+                    isDisabled = isDisabled
                 )
 
                 val requestBody = RequestBody.create(
                     "application/json".toMediaType(),
                     gson.toJson(assignmentRequest)
                 )
+
+                Log.d(TAG, "Sending assignment request: ${gson.toJson(assignmentRequest)}")
 
                 val request = Request.Builder()
                     .url("${ApiConstants.API_BASE_URL}${ApiConstants.Endpoints.ASSIGN_VISITOR}")
@@ -402,16 +405,18 @@ class ApiService {
                     if (response.isSuccessful) {
                         val jsonString = response.body?.string()
                         if (jsonString != null) {
-                            Log.d(TAG, "User assignment response: $jsonString")
-                            gson.fromJson(jsonString, UserAssignment::class.java)
+                            Log.d(TAG, "Assignment response: $jsonString")
+                            gson.fromJson(jsonString, AssignmentResponse::class.java)
                         } else null
                     } else {
-                        Log.e(TAG, "Failed to request user assignment: ${response.code} - ${response.message}")
+                        val errorBody = response.body?.string()
+                        Log.e(TAG, "Failed to request assignment: ${response.code} - ${response.message}")
+                        Log.e(TAG, "Error body: $errorBody")
                         null
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error requesting user assignment", e)
+                Log.e(TAG, "Error requesting assignment", e)
                 null
             }
         }
