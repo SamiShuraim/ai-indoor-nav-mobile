@@ -2063,21 +2063,21 @@ class MainActivity : AppCompatActivity() {
             Log.d(TAG, "Current floor: id=${currentFloor?.id}, number=${currentFloor?.floorNumber}, name=${currentFloor?.name}")
             Log.d(TAG, "Available floors: ${floors.map { "id=${it.id}, num=${it.floorNumber}, name=${it.name}" }}")
             
-            // Get floor number from trilaterated position, not from assignment
-            val floorNumber = getFloorNumberFromTrilateration() ?: (currentFloor?.floorNumber ?: 1)
+            // Show the accessibility LEVEL (L1, L2, L3), not the floor number
+            val level = assignment.level ?: 1
             
             val healthEmoji = assignment.getHealthStatusEmoji()
 
-            // Compact format: 🚶 F2 | 45 | ✅
-            // Or: ♿ F3 | 72 | ⚠️
+            // Compact format: 🚶 L2 | 45 | ✅
+            // Or: ♿ L3 | 72 | ⚠️
             val statusEmoji = if (assignment.isDisabled) "⚠️" else "✅"
 
-            val infoText = "$healthEmoji F$floorNumber | ${assignment.age} | $statusEmoji"
+            val infoText = "$healthEmoji L$level | ${assignment.age} | $statusEmoji"
 
             assignmentInfoText.text = infoText
             assignmentInfoContainer.visibility = View.VISIBLE
 
-            Log.d(TAG, "Assignment displayed: $infoText (actualFloorNumber=$floorNumber, level=${assignment.level}, accessibilityLevel=${assignment.level})")
+            Log.d(TAG, "Assignment displayed: $infoText (level=${assignment.level})")
 
             // Navigate user to their assigned level after trilateration
             navigateToAssignedLevel(assignment)
@@ -2097,12 +2097,12 @@ class MainActivity : AppCompatActivity() {
                 return
             }
 
-            // Get floor number from trilaterated position
-            val floorNumber = getFloorNumberFromTrilateration() ?: (currentFloor?.floorNumber ?: 1)
+            // Show the accessibility LEVEL (L1, L2, L3), not the floor number
+            val level = assignment.level ?: 1
             
             val healthEmoji = assignment.getHealthStatusEmoji()
             val statusEmoji = if (assignment.isDisabled) "⚠️" else "✅"
-            val infoText = "$healthEmoji F$floorNumber | ${assignment.age} | $statusEmoji"
+            val infoText = "$healthEmoji L$level | ${assignment.age} | $statusEmoji"
 
             // Only update if text has changed to avoid unnecessary redraws
             if (assignmentInfoText.text != infoText) {
