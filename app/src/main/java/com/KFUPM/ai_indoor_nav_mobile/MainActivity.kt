@@ -379,9 +379,6 @@ class MainActivity : AppCompatActivity() {
         // Reset assignment flag when changing floors
         hasRequestedInitialAssignment = false
 
-        // Update assignment display if it's visible
-        updateAssignmentDisplay()
-
         lifecycleScope.launch {
             try {
                 Log.d(TAG, "Loading GeoJSON data for floor: ${floor.name}")
@@ -1792,9 +1789,6 @@ class MainActivity : AppCompatActivity() {
                     // Update blue dot on map
                     updateLocalizationMarker(x, y, confidence)
                     
-                    // Update assignment display with current floor
-                    updateAssignmentDisplay()
-                    
                     // Update navigation path progress
                     updateNavigationProgress(nodeId)
                     
@@ -2059,25 +2053,19 @@ class MainActivity : AppCompatActivity() {
      */
     private fun displayAssignment(assignment: UserAssignment) {
         try {
-            Log.d(TAG, "displayAssignment called: floorId=${assignment.floorId}, level=${assignment.level}, age=${assignment.age}, isDisabled=${assignment.isDisabled}")
-            Log.d(TAG, "Current floor: id=${currentFloor?.id}, number=${currentFloor?.floorNumber}, name=${currentFloor?.name}")
-            Log.d(TAG, "Available floors: ${floors.map { "id=${it.id}, num=${it.floorNumber}, name=${it.name}" }}")
-            
-            // Show the accessibility LEVEL (L1, L2, L3), not the floor number
-            val level = assignment.level ?: 1
+            Log.d(TAG, "displayAssignment called: level=${assignment.level}, age=${assignment.age}, isDisabled=${assignment.isDisabled}")
             
             val healthEmoji = assignment.getHealthStatusEmoji()
-
-            // Compact format: 🚶 L2 | 45 | ✅
-            // Or: ♿ L3 | 72 | ⚠️
             val statusEmoji = if (assignment.isDisabled) "⚠️" else "✅"
-
+            
+            // Show assigned accessibility LEVEL (L1, L2, L3) - this is what you've been assigned
+            val level = assignment.level ?: 1
             val infoText = "$healthEmoji L$level | ${assignment.age} | $statusEmoji"
 
             assignmentInfoText.text = infoText
             assignmentInfoContainer.visibility = View.VISIBLE
 
-            Log.d(TAG, "Assignment displayed: $infoText (level=${assignment.level})")
+            Log.d(TAG, "Assignment displayed: $infoText (level=$level)")
 
             // Navigate user to their assigned level after trilateration
             navigateToAssignedLevel(assignment)
@@ -2088,7 +2076,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Update assignment display with current trilaterated floor
+     * Update assignment display - ONLY used to refresh the display, not to change the level
+     * The level is static and comes from the assignment, NOT from trilateration
      */
     private fun updateAssignmentDisplay() {
         try {
@@ -2097,19 +2086,17 @@ class MainActivity : AppCompatActivity() {
                 return
             }
 
-            // Get FLOOR NUMBER from trilaterated position (not level)
-            val floorNumber = getFloorNumberFromTrilateration() ?: (currentFloor?.floorNumber ?: 1)
-            
-            Log.d(TAG, "updateAssignmentDisplay: floorNumber=$floorNumber from trilateration")
+            // Show the assigned accessibility LEVEL (L1, L2, L3) - this is STATIC
+            val level = assignment.level ?: 1
             
             val healthEmoji = assignment.getHealthStatusEmoji()
             val statusEmoji = if (assignment.isDisabled) "⚠️" else "✅"
-            val infoText = "$healthEmoji F$floorNumber | ${assignment.age} | $statusEmoji"
+            val infoText = "$healthEmoji L$level | ${assignment.age} | $statusEmoji"
 
-            // Update on main thread
-            runOnUiThread {
+            // Only update if text changed
+            if (assignmentInfoText.text != infoText) {
                 assignmentInfoText.text = infoText
-                Log.d(TAG, "Assignment display updated to: $infoText")
+                Log.d(TAG, "Assignment display: $infoText")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error updating assignment display", e)
