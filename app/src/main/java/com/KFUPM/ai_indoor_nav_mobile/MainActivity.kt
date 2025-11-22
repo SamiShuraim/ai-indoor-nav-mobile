@@ -1662,7 +1662,7 @@ class MainActivity : AppCompatActivity() {
                 val age = (18..90).random()
                 val isDisabled = Math.random() < 0.20
 
-                Log.d(TAG, "Requesting initial assignment with age=$age, isDisabled=$isDisabled")
+                Log.d(TAG, "Requesting initial assignment with age=$age, isDisabled=$isDisabled, floorId=$floorId, currentFloor=${currentFloor?.name}")
 
                 // Request assignment from backend
                 val assignmentResponse = apiService.requestUserAssignment(age, isDisabled)
@@ -1670,16 +1670,18 @@ class MainActivity : AppCompatActivity() {
                 val assignment = if (assignmentResponse != null) {
                     // Capture the visitor ID from the response
                     visitorId = assignmentResponse.visitorId
-                    Log.d(TAG, "Visitor ID captured from assignment: $visitorId")
+                    Log.d(TAG, "Visitor ID captured from initial assignment: $visitorId, level=${assignmentResponse.level}")
                     
                     // Convert response to UserAssignment
-                    UserAssignment(
+                    val userAssignment = UserAssignment(
                         age = assignmentResponse.decision.age,
                         isDisabled = assignmentResponse.decision.isDisabled,
                         level = assignmentResponse.level,
                         floorId = floorId,
                         floorName = currentFloor?.name
                     )
+                    Log.d(TAG, "Created initial UserAssignment: age=${userAssignment.age}, isDisabled=${userAssignment.isDisabled}, level=${userAssignment.level}, floorId=${userAssignment.floorId}, floorName=${userAssignment.floorName}")
+                    userAssignment
                 } else {
                     // Fallback: Generate assignment locally if backend doesn't support it
                     Log.d(TAG, "Backend assignment not available, generating locally")
@@ -1702,6 +1704,7 @@ class MainActivity : AppCompatActivity() {
         val floorId = currentFloor?.id
 
         if (floorId == null) {
+            Log.w(TAG, "Cannot request assignment: currentFloor is null. floors.size=${floors.size}")
             Toast.makeText(this, "No floor selected", Toast.LENGTH_SHORT).show()
             return
         }
@@ -1712,7 +1715,7 @@ class MainActivity : AppCompatActivity() {
                 val age = (18..90).random()
                 val isDisabled = Math.random() < 0.20
 
-                Log.d(TAG, "Requesting new assignment with age=$age, isDisabled=$isDisabled")
+                Log.d(TAG, "Requesting new assignment with age=$age, isDisabled=$isDisabled, floorId=$floorId, currentFloor=${currentFloor?.name}")
 
                 // Request new assignment from backend
                 val assignmentResponse = apiService.requestUserAssignment(age, isDisabled)
@@ -1720,17 +1723,19 @@ class MainActivity : AppCompatActivity() {
                 val assignment = if (assignmentResponse != null) {
                     // Capture the visitor ID from the response
                     visitorId = assignmentResponse.visitorId
-                    Log.d(TAG, "Visitor ID captured from new assignment: $visitorId")
+                    Log.d(TAG, "Visitor ID captured from new assignment: $visitorId, level=${assignmentResponse.level}")
                     Toast.makeText(this@MainActivity, "New visitor ID: $visitorId", Toast.LENGTH_SHORT).show()
                     
                     // Convert response to UserAssignment
-                    UserAssignment(
+                    val userAssignment = UserAssignment(
                         age = assignmentResponse.decision.age,
                         isDisabled = assignmentResponse.decision.isDisabled,
                         level = assignmentResponse.level,
                         floorId = floorId,
                         floorName = currentFloor?.name
                     )
+                    Log.d(TAG, "Created UserAssignment: age=${userAssignment.age}, isDisabled=${userAssignment.isDisabled}, level=${userAssignment.level}, floorId=${userAssignment.floorId}, floorName=${userAssignment.floorName}")
+                    userAssignment
                 } else {
                     // Fallback: Generate assignment locally if backend doesn't support it
                     Log.d(TAG, "Backend assignment not available, generating locally")
@@ -1773,7 +1778,21 @@ class MainActivity : AppCompatActivity() {
      */
     private fun displayAssignment(assignment: UserAssignment) {
         try {
-            val floorNumber = currentFloor?.floorNumber ?: 0
+            // Look up the floor number from the assignment's floorId
+            val floorNumber = if (assignment.floorId != null) {
+                val floor = floors.find { it.id == assignment.floorId }
+                if (floor != null) {
+                    Log.d(TAG, "Found floor for assignment: floorId=${assignment.floorId}, floorNumber=${floor.floorNumber}, name=${floor.name}")
+                    floor.floorNumber
+                } else {
+                    Log.w(TAG, "No floor found with id=${assignment.floorId}. Available floors: ${floors.map { "id=${it.id}, number=${it.floorNumber}" }}")
+                    currentFloor?.floorNumber ?: 1 // Default to 1 instead of 0
+                }
+            } else {
+                Log.w(TAG, "Assignment has no floorId. Using currentFloor: ${currentFloor?.floorNumber}")
+                currentFloor?.floorNumber ?: 1 // Default to 1 instead of 0
+            }
+            
             val healthEmoji = assignment.getHealthStatusEmoji()
 
             // Compact format: 🚶 F2 | 45 | ✅
@@ -1785,7 +1804,7 @@ class MainActivity : AppCompatActivity() {
             assignmentInfoText.text = infoText
             assignmentInfoContainer.visibility = View.VISIBLE
 
-            Log.d(TAG, "Assignment displayed: $infoText")
+            Log.d(TAG, "Assignment displayed: $infoText (floorId=${assignment.floorId}, level=${assignment.level}, accessibilityLevel=${assignment.level})")
 
             // Draw path to nearest node with correct accessibility level
             drawPathToAccessibilityLevel(assignment)
