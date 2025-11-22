@@ -368,6 +368,9 @@ class MainActivity : AppCompatActivity() {
         // Reset assignment flag when changing floors
         hasRequestedInitialAssignment = false
 
+        // Update assignment display if it's visible
+        updateAssignmentDisplay()
+
         lifecycleScope.launch {
             try {
                 Log.d(TAG, "Loading GeoJSON data for floor: ${floor.name}")
@@ -1555,6 +1558,9 @@ class MainActivity : AppCompatActivity() {
                     // Update blue dot on map
                     updateLocalizationMarker(x, y, confidence)
                     
+                    // Update assignment display with current floor
+                    updateAssignmentDisplay()
+                    
                     // Check for automatic floor switching
                     if (nodeId != null && confidence > 0.6) { // Only switch if we're confident
                         val detectedFloorId = nodeToFloorMap[nodeId]
@@ -1820,21 +1826,8 @@ class MainActivity : AppCompatActivity() {
             Log.d(TAG, "Current floor: id=${currentFloor?.id}, number=${currentFloor?.floorNumber}, name=${currentFloor?.name}")
             Log.d(TAG, "Available floors: ${floors.map { "id=${it.id}, num=${it.floorNumber}, name=${it.name}" }}")
             
-            // Look up the floor number from the assignment's floorId
-            val floorNumber = if (assignment.floorId != null) {
-                val floor = floors.find { it.id == assignment.floorId }
-                if (floor != null) {
-                    Log.d(TAG, "Found floor for assignment: floorId=${assignment.floorId}, floorNumber=${floor.floorNumber}, name=${floor.name}")
-                    floor.floorNumber
-                } else {
-                    Log.e(TAG, "CRITICAL: No floor found with id=${assignment.floorId}. Available floors: ${floors.map { "id=${it.id}, number=${it.floorNumber}" }}")
-                    Log.e(TAG, "Falling back to currentFloor?.floorNumber: ${currentFloor?.floorNumber}")
-                    currentFloor?.floorNumber ?: 1 // Default to 1 instead of 0
-                }
-            } else {
-                Log.e(TAG, "CRITICAL: Assignment has no floorId! Using currentFloor: id=${currentFloor?.id}, number=${currentFloor?.floorNumber}")
-                currentFloor?.floorNumber ?: 1 // Default to 1 instead of 0
-            }
+            // Get floor number from trilaterated position, not from assignment
+            val floorNumber = getFloorNumberFromTrilateration() ?: (currentFloor?.floorNumber ?: 1)
             
             val healthEmoji = assignment.getHealthStatusEmoji()
 
@@ -1847,13 +1840,65 @@ class MainActivity : AppCompatActivity() {
             assignmentInfoText.text = infoText
             assignmentInfoContainer.visibility = View.VISIBLE
 
-            Log.d(TAG, "Assignment displayed: $infoText (floorId=${assignment.floorId}, level=${assignment.level}, accessibilityLevel=${assignment.level})")
+            Log.d(TAG, "Assignment displayed: $infoText (actualFloorNumber=$floorNumber, level=${assignment.level}, accessibilityLevel=${assignment.level})")
 
             // Navigate user to their assigned level after trilateration
             navigateToAssignedLevel(assignment)
 
         } catch (e: Exception) {
             Log.e(TAG, "Error displaying assignment", e)
+        }
+    }
+
+    /**
+     * Update assignment display with current trilaterated floor
+     */
+    private fun updateAssignmentDisplay() {
+        try {
+            val assignment = currentAssignment
+            if (assignment == null || assignmentInfoContainer.visibility != View.VISIBLE) {
+                return
+            }
+
+            // Get floor number from trilaterated position
+            val floorNumber = getFloorNumberFromTrilateration() ?: (currentFloor?.floorNumber ?: 1)
+            
+            val healthEmoji = assignment.getHealthStatusEmoji()
+            val statusEmoji = if (assignment.isDisabled) "⚠️" else "✅"
+            val infoText = "$healthEmoji F$floorNumber | ${assignment.age} | $statusEmoji"
+
+            // Only update if text has changed to avoid unnecessary redraws
+            if (assignmentInfoText.text != infoText) {
+                assignmentInfoText.text = infoText
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error updating assignment display", e)
+        }
+    }
+
+    /**
+     * Get the current floor number based on trilaterated position
+     */
+    private fun getFloorNumberFromTrilateration(): Int? {
+        try {
+            // Get current node from trilateration
+            val currentNodeId = localizationController.localizationState.value.currentNodeId
+            if (currentNodeId == null) {
+                return null
+            }
+
+            // Look up floor ID from node-to-floor mapping
+            val floorId = nodeToFloorMap[currentNodeId]
+            if (floorId == null) {
+                return null
+            }
+
+            // Find the floor object and return its floor number
+            val floor = floors.find { it.id == floorId }
+            return floor?.floorNumber
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting floor number from trilateration", e)
+            return null
         }
     }
 
