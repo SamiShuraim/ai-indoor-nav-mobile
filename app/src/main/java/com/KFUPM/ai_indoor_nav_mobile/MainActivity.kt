@@ -110,10 +110,21 @@ class MainActivity : AppCompatActivity() {
     private val pathNodesLayerId = "path-nodes-layer"
     private val pathEdgesLayerId = "path-edges-layer"
     
+    // Past path IDs (for visited nodes/edges)
+    private val pastPathNodesSourceId = "past-path-nodes-source"
+    private val pastPathEdgesSourceId = "past-path-edges-source"
+    private val pastPathNodesLayerId = "past-path-nodes-layer"
+    private val pastPathEdgesLayerId = "past-path-edges-layer"
+    
     // Localization position marker IDs
     private val localizationMarkerSourceId = "localization-marker-source"
     private val localizationMarkerLayerId = "localization-marker-layer"
     private val localizationMarkerStrokeLayerId = "localization-marker-stroke-layer"
+    
+    // Current navigation state
+    private var currentNavigationPath: FeatureCollection? = null
+    private var targetNavigationLevel: Int? = null
+    private val visitedPathNodeIds = mutableSetOf<Int>()
     companion object {
         private const val TAG = "MainActivity"
     }
@@ -1352,7 +1363,7 @@ class MainActivity : AppCompatActivity() {
                 
                 if (pathFeatureCollection != null) {
                     Log.d(TAG, "Path found with ${pathFeatureCollection.features()?.size ?: 0} features")
-                    displayPath(pathFeatureCollection)
+                    displayPath(pathFeatureCollection, targetLevel = null)
                     
                     // Show clear path button
                     fabClearPath.visibility = View.VISIBLE
@@ -1372,7 +1383,7 @@ class MainActivity : AppCompatActivity() {
     /**
      * Display the navigation path on the map
      */
-    private fun displayPath(pathFeatureCollection: FeatureCollection) {
+    private fun displayPath(pathFeatureCollection: FeatureCollection, targetLevel: Int? = null) {
         val style = mapLibreMap.style
         if (style == null || !style.isFullyLoaded) {
             Log.w(TAG, "Map style not ready for path display")
@@ -1381,6 +1392,11 @@ class MainActivity : AppCompatActivity() {
         
         try {
             Log.d(TAG, "Displaying navigation path...")
+            
+            // Store current navigation state
+            currentNavigationPath = pathFeatureCollection
+            targetNavigationLevel = targetLevel
+            visitedPathNodeIds.clear()
             
             // Clear existing path layers
             clearPathLayers(style)
@@ -1458,6 +1474,11 @@ class MainActivity : AppCompatActivity() {
         clearPathLayers(style)
         fabClearPath.visibility = View.GONE
         
+        // Clear navigation state
+        currentNavigationPath = null
+        targetNavigationLevel = null
+        visitedPathNodeIds.clear()
+        
         Toast.makeText(this, "Navigation path cleared", Toast.LENGTH_SHORT).show()
         Log.d(TAG, "Navigation path cleared")
     }
@@ -1467,15 +1488,228 @@ class MainActivity : AppCompatActivity() {
      */
     private fun clearPathLayers(style: Style) {
         try {
-            // Remove layers
+            // Remove future path layers
             style.getLayer(pathNodesLayerId)?.let { style.removeLayer(pathNodesLayerId) }
             style.getLayer(pathEdgesLayerId)?.let { style.removeLayer(pathEdgesLayerId) }
+            
+            // Remove past path layers
+            style.getLayer(pastPathNodesLayerId)?.let { style.removeLayer(pastPathNodesLayerId) }
+            style.getLayer(pastPathEdgesLayerId)?.let { style.removeLayer(pastPathEdgesLayerId) }
             
             // Remove sources
             style.getSource(pathNodesSourceId)?.let { style.removeSource(pathNodesSourceId) }
             style.getSource(pathEdgesSourceId)?.let { style.removeSource(pathEdgesSourceId) }
+            style.getSource(pastPathNodesSourceId)?.let { style.removeSource(pastPathNodesSourceId) }
+            style.getSource(pastPathEdgesSourceId)?.let { style.removeSource(pastPathEdgesSourceId) }
         } catch (e: Exception) {
             Log.w(TAG, "Error clearing path layers", e)
+        }
+    }
+
+    /**
+     * Update navigation progress as user walks along the path
+     */
+    private fun updateNavigationProgress(currentNodeId: String?) {
+        try {
+            if (currentNodeId == null || currentNavigationPath == null) {
+                return
+            }
+
+            // Parse node ID to integer
+            val currentNodeIdInt = currentNodeId.toIntOrNull() ?: return
+
+            // Get all features from the current path
+            val features = currentNavigationPath?.features() ?: return
+
+            // Find if current node is in the path
+            val pathNodes = features.filter { it.getBooleanProperty("is_path_node") == true }
+            val isOnPath = pathNodes.any { feature ->
+                val nodeIdStr = feature.getStringProperty("id")
+                nodeIdStr?.toIntOrNull() == currentNodeIdInt
+            }
+
+            if (isOnPath) {
+                // Mark this node as visited
+                if (!visitedPathNodeIds.contains(currentNodeIdInt)) {
+                    visitedPathNodeIds.add(currentNodeIdInt)
+                    Log.d(TAG, "Node $currentNodeIdInt marked as visited (${visitedPathNodeIds.size} nodes visited)")
+                    
+                    // Redraw the path with updated visited nodes
+                    redrawPathWithProgress()
+                }
+
+                // Check if we reached the destination
+                checkIfDestinationReached(currentNodeIdInt)
+            }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Error updating navigation progress", e)
+        }
+    }
+
+    /**
+     * Check if user has reached their destination
+     */
+    private fun checkIfDestinationReached(currentNodeIdInt: Int) {
+        try {
+            val targetLevel = targetNavigationLevel ?: return
+
+            // Check if current node has the same level as target
+            lifecycleScope.launch {
+                try {
+                    val currentFloorId = nodeToFloorMap[currentNodeIdInt.toString()]
+                    if (currentFloorId == null) {
+                        return@launch
+                    }
+
+                    // Get route nodes for current floor to check node level
+                    val routeNodes = apiService.getRouteNodesByFloor(currentFloorId)
+                    val currentNode = routeNodes?.find { it.id == currentNodeIdInt }
+
+                    if (currentNode != null && currentNode.level == targetLevel) {
+                        Log.d(TAG, "Destination reached! Node $currentNodeIdInt has level $targetLevel")
+                        
+                        withContext(Dispatchers.Main) {
+                            // Show success message
+                            Toast.makeText(
+                                this@MainActivity,
+                                "✅ You have reached your destination (Level $targetLevel)!",
+                                Toast.LENGTH_LONG
+                            ).show()
+
+                            // Auto-clear the navigation
+                            clearPath()
+                        }
+                    }
+
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error checking destination", e)
+                }
+            }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in checkIfDestinationReached", e)
+        }
+    }
+
+    /**
+     * Redraw the path with visited nodes shown in gray
+     */
+    private fun redrawPathWithProgress() {
+        val style = mapLibreMap.style
+        if (style == null || !style.isFullyLoaded) {
+            return
+        }
+
+        try {
+            val features = currentNavigationPath?.features() ?: return
+
+            // Separate into past and future nodes/edges
+            val pastNodes = mutableListOf<Feature>()
+            val futureNodes = mutableListOf<Feature>()
+            val pastEdges = mutableListOf<Feature>()
+            val futureEdges = mutableListOf<Feature>()
+
+            features.forEach { feature ->
+                val isPathNode = feature.getBooleanProperty("is_path_node") ?: false
+                val isPathEdge = feature.getBooleanProperty("is_path_edge") ?: false
+
+                if (isPathNode) {
+                    // Check if this node has been visited
+                    val nodeIdStr = feature.getStringProperty("id")
+                    val nodeId = nodeIdStr?.toIntOrNull()
+                    
+                    if (nodeId != null && visitedPathNodeIds.contains(nodeId)) {
+                        pastNodes.add(feature)
+                    } else {
+                        futureNodes.add(feature)
+                    }
+                } else if (isPathEdge) {
+                    // Check if both nodes of this edge have been visited
+                    val fromNodeId = feature.getNumberProperty("from_node_id")?.toInt()
+                    val toNodeId = feature.getNumberProperty("to_node_id")?.toInt()
+                    
+                    if (fromNodeId != null && toNodeId != null &&
+                        visitedPathNodeIds.contains(fromNodeId) && 
+                        visitedPathNodeIds.contains(toNodeId)) {
+                        pastEdges.add(feature)
+                    } else {
+                        futureEdges.add(feature)
+                    }
+                }
+            }
+
+            // Clear existing path layers
+            clearPathLayers(style)
+
+            // Add past path edges (gray, faded)
+            if (pastEdges.isNotEmpty()) {
+                val pastEdgesCollection = FeatureCollection.fromFeatures(pastEdges)
+                val pastEdgesSource = GeoJsonSource(pastPathEdgesSourceId, pastEdgesCollection)
+                style.addSource(pastEdgesSource)
+
+                val pastEdgesLayer = LineLayer(pastPathEdgesLayerId, pastPathEdgesSourceId)
+                    .withProperties(
+                        lineColor("#888888"), // Gray for visited path
+                        lineWidth(5f),
+                        lineOpacity(0.5f)
+                    )
+                style.addLayer(pastEdgesLayer)
+            }
+
+            // Add past path nodes (gray, smaller)
+            if (pastNodes.isNotEmpty()) {
+                val pastNodesCollection = FeatureCollection.fromFeatures(pastNodes)
+                val pastNodesSource = GeoJsonSource(pastPathNodesSourceId, pastNodesCollection)
+                style.addSource(pastNodesSource)
+
+                val pastNodesLayer = CircleLayer(pastPathNodesLayerId, pastPathNodesSourceId)
+                    .withProperties(
+                        circleRadius(6f),
+                        circleColor("#888888"), // Gray for visited nodes
+                        circleStrokeColor("#FFFFFF"),
+                        circleStrokeWidth(1f),
+                        circleOpacity(0.6f)
+                    )
+                style.addLayer(pastNodesLayer)
+            }
+
+            // Add future path edges (orange-red, bright)
+            if (futureEdges.isNotEmpty()) {
+                val futureEdgesCollection = FeatureCollection.fromFeatures(futureEdges)
+                val futureEdgesSource = GeoJsonSource(pathEdgesSourceId, futureEdgesCollection)
+                style.addSource(futureEdgesSource)
+
+                val futureEdgesLayer = LineLayer(pathEdgesLayerId, pathEdgesSourceId)
+                    .withProperties(
+                        lineColor("#FF6B35"), // Orange-red for future path
+                        lineWidth(6f),
+                        lineOpacity(0.8f)
+                    )
+                style.addLayer(futureEdgesLayer)
+            }
+
+            // Add future path nodes (orange-red, bright)
+            if (futureNodes.isNotEmpty()) {
+                val futureNodesCollection = FeatureCollection.fromFeatures(futureNodes)
+                val futureNodesSource = GeoJsonSource(pathNodesSourceId, futureNodesCollection)
+                style.addSource(futureNodesSource)
+
+                val futureNodesLayer = CircleLayer(pathNodesLayerId, pathNodesSourceId)
+                    .withProperties(
+                        circleRadius(8f),
+                        circleColor("#FF6B35"), // Orange-red for future nodes
+                        circleStrokeColor("#FFFFFF"),
+                        circleStrokeWidth(2f),
+                        circleOpacity(0.9f)
+                    )
+                style.addLayer(futureNodesLayer)
+            }
+
+            Log.d(TAG, "Path redrawn: ${pastNodes.size} visited nodes, ${futureNodes.size} remaining nodes")
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Error redrawing path with progress", e)
         }
     }
 
@@ -1560,6 +1794,9 @@ class MainActivity : AppCompatActivity() {
                     
                     // Update assignment display with current floor
                     updateAssignmentDisplay()
+                    
+                    // Update navigation path progress
+                    updateNavigationProgress(nodeId)
                     
                     // Check for automatic floor switching
                     if (nodeId != null && confidence > 0.6) { // Only switch if we're confident
@@ -1942,7 +2179,7 @@ class MainActivity : AppCompatActivity() {
 
                 if (pathFeatureCollection != null) {
                     Log.d(TAG, "Navigation path received with ${pathFeatureCollection.features()?.size ?: 0} features")
-                    displayPath(pathFeatureCollection)
+                    displayPath(pathFeatureCollection, targetLevel)
                     fabClearPath.visibility = View.VISIBLE
                     Toast.makeText(this@MainActivity, "Navigation to Level $targetLevel", Toast.LENGTH_SHORT).show()
                 } else {
@@ -2026,7 +2263,7 @@ class MainActivity : AppCompatActivity() {
                 val pathFeatureCollection = apiService.findPath(pathRequest)
 
                 if (pathFeatureCollection != null) {
-                    displayPath(pathFeatureCollection)
+                    displayPath(pathFeatureCollection, requiredLevel)
                     fabClearPath.visibility = View.VISIBLE
                     Toast.makeText(this@MainActivity, "Path to accessibility level $requiredLevel", Toast.LENGTH_SHORT).show()
                     Log.d(TAG, "Path to accessibility level $requiredLevel displayed")
