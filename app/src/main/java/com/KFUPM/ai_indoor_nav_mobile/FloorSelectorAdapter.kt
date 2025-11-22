@@ -15,6 +15,8 @@ class FloorSelectorAdapter(
     private val onFloorSelected: (Floor) -> Unit
 ) : RecyclerView.Adapter<FloorSelectorAdapter.FloorViewHolder>() {
 
+    private var userCurrentFloorId: Int? = null // Track user's actual physical floor
+
     class FloorViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         val floorName: TextView = itemView.findViewById(R.id.floorName)
     }
@@ -27,9 +29,14 @@ class FloorSelectorAdapter(
 
     override fun onBindViewHolder(holder: FloorViewHolder, position: Int) {
         val floor = floors[position]
-        val displayText = "F${floor.floorNumber}"
+        
+        // Add arrow indicator if this is the user's current physical floor
+        val isUserCurrentFloor = floor.id == userCurrentFloorId
+        val arrow = if (isUserCurrentFloor) "→ " else ""
+        val displayText = "${arrow}F${floor.floorNumber}"
+        
         holder.floorName.text = displayText
-        Log.d("FloorSelector", "Binding floor: id=${floor.id}, floorNumber=${floor.floorNumber}, name=${floor.name}, displayText=$displayText")
+        Log.d("FloorSelector", "Binding floor: id=${floor.id}, floorNumber=${floor.floorNumber}, name=${floor.name}, displayText=$displayText, userCurrentFloor=$isUserCurrentFloor")
         
         // Set selection state
         val isSelected = floor.id == selectedFloorId
@@ -62,5 +69,12 @@ class FloorSelectorAdapter(
     fun setSelectedFloor(floorId: Int) {
         selectedFloorId = floorId
         notifyDataSetChanged()
+    }
+    
+    fun setUserCurrentFloor(floorId: Int) {
+        if (userCurrentFloorId != floorId) {
+            userCurrentFloorId = floorId
+            notifyDataSetChanged()
+        }
     }
 }

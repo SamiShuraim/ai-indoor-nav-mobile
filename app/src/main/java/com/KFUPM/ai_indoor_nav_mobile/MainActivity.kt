@@ -82,6 +82,7 @@ class MainActivity : AppCompatActivity() {
     private var currentAssignment: UserAssignment? = null
     private var hasRequestedInitialAssignment = false
     private var hasAutoClickedAssignment = false // Track if we've auto-clicked the assignment button once
+    private var hasNavigatedToAssignedLevel = false // Track if we've navigated to the assigned level
     
     // Mapping of node ID to floor ID for automatic floor switching
     private val nodeToFloorMap = mutableMapOf<String, Int>()
@@ -109,10 +110,28 @@ class MainActivity : AppCompatActivity() {
     private val pathNodesLayerId = "path-nodes-layer"
     private val pathEdgesLayerId = "path-edges-layer"
     
+    // Past path IDs (for visited nodes/edges)
+    private val pastPathNodesSourceId = "past-path-nodes-source"
+    private val pastPathEdgesSourceId = "past-path-edges-source"
+    private val pastPathNodesLayerId = "past-path-nodes-layer"
+    private val pastPathEdgesLayerId = "past-path-edges-layer"
+    
+    // Floor transition indicators (stairs/elevator markers)
+    private val transitionIndicatorsSourceId = "transition-indicators-source"
+    private val transitionIndicatorsLayerId = "transition-indicators-layer"
+    
     // Localization position marker IDs
     private val localizationMarkerSourceId = "localization-marker-source"
     private val localizationMarkerLayerId = "localization-marker-layer"
     private val localizationMarkerStrokeLayerId = "localization-marker-stroke-layer"
+    
+    // Current navigation state
+    private var currentNavigationPath: FeatureCollection? = null
+    private var targetNavigationLevel: Int? = null
+    private val visitedPathNodeIds = mutableSetOf<Int>()
+    
+    // Cache for node types (to avoid repeated API calls)
+    private val nodeTypeCache = mutableMapOf<Int, String?>()
     companion object {
         private const val TAG = "MainActivity"
     }
@@ -367,6 +386,7 @@ class MainActivity : AppCompatActivity() {
         // Reset assignment flag when changing floors
         hasRequestedInitialAssignment = false
 
+        // Redraw path if navigation is active (after floor data loads)
         lifecycleScope.launch {
             try {
                 Log.d(TAG, "Loading GeoJSON data for floor: ${floor.name}")
@@ -400,6 +420,11 @@ class MainActivity : AppCompatActivity() {
                 
                 // Initialize localization for this floor
                 initializeLocalization(floor.id)
+                
+                // Redraw navigation path for the new floor if navigation is active
+                if (currentNavigationPath != null) {
+                    redrawPathWithProgress()
+                }
                 
                 // Auto-click assignment button after first floor is fully loaded (only once at startup)
                 if (!hasAutoClickedAssignment) {
@@ -1348,7 +1373,7 @@ class MainActivity : AppCompatActivity() {
                 
                 if (pathFeatureCollection != null) {
                     Log.d(TAG, "Path found with ${pathFeatureCollection.features()?.size ?: 0} features")
-                    displayPath(pathFeatureCollection)
+                    displayPath(pathFeatureCollection, targetLevel = null)
                     
                     // Show clear path button
                     fabClearPath.visibility = View.VISIBLE
@@ -1368,7 +1393,7 @@ class MainActivity : AppCompatActivity() {
     /**
      * Display the navigation path on the map
      */
-    private fun displayPath(pathFeatureCollection: FeatureCollection) {
+    private fun displayPath(pathFeatureCollection: FeatureCollection, targetLevel: Int? = null) {
         val style = mapLibreMap.style
         if (style == null || !style.isFullyLoaded) {
             Log.w(TAG, "Map style not ready for path display")
@@ -1378,62 +1403,13 @@ class MainActivity : AppCompatActivity() {
         try {
             Log.d(TAG, "Displaying navigation path...")
             
-            // Clear existing path layers
-            clearPathLayers(style)
+            // Store current navigation state
+            currentNavigationPath = pathFeatureCollection
+            targetNavigationLevel = targetLevel
+            visitedPathNodeIds.clear()
             
-            val features = pathFeatureCollection.features() ?: return
-            if (features.isEmpty()) {
-                Log.w(TAG, "No path features to display")
-                return
-            }
-            
-            // Separate path nodes and path edges
-            val pathNodes = mutableListOf<Feature>()
-            val pathEdges = mutableListOf<Feature>()
-            
-            features.forEach { feature ->
-                val isPathNode = feature.getBooleanProperty("is_path_node") ?: false
-                val isPathEdge = feature.getBooleanProperty("is_path_edge") ?: false
-                
-                when {
-                    isPathNode -> pathNodes.add(feature)
-                    isPathEdge -> pathEdges.add(feature)
-                }
-            }
-            
-            Log.d(TAG, "Path contains ${pathNodes.size} nodes and ${pathEdges.size} edges")
-            
-            // Add path edges (lines) with distinct color
-            if (pathEdges.isNotEmpty()) {
-                val pathEdgesCollection = FeatureCollection.fromFeatures(pathEdges)
-                val pathEdgesSource = GeoJsonSource(pathEdgesSourceId, pathEdgesCollection)
-                style.addSource(pathEdgesSource)
-                
-                val pathEdgesLayer = LineLayer(pathEdgesLayerId, pathEdgesSourceId)
-                    .withProperties(
-                        lineColor("#FF6B35"), // Orange-red color for path
-                        lineWidth(6f),
-                        lineOpacity(0.8f)
-                    )
-                style.addLayer(pathEdgesLayer)
-            }
-            
-            // Add path nodes with distinct color
-            if (pathNodes.isNotEmpty()) {
-                val pathNodesCollection = FeatureCollection.fromFeatures(pathNodes)
-                val pathNodesSource = GeoJsonSource(pathNodesSourceId, pathNodesCollection)
-                style.addSource(pathNodesSource)
-                
-                val pathNodesLayer = CircleLayer(pathNodesLayerId, pathNodesSourceId)
-                    .withProperties(
-                        circleRadius(8f),
-                        circleColor("#FF6B35"), // Orange-red color for path nodes
-                        circleStrokeColor("#FFFFFF"),
-                        circleStrokeWidth(2f),
-                        circleOpacity(0.9f)
-                    )
-                style.addLayer(pathNodesLayer)
-            }
+            // Redraw with filtering for current floor
+            redrawPathWithProgress()
             
             Log.d(TAG, "Navigation path displayed successfully")
             
@@ -1454,6 +1430,14 @@ class MainActivity : AppCompatActivity() {
         clearPathLayers(style)
         fabClearPath.visibility = View.GONE
         
+        // Clear navigation state
+        currentNavigationPath = null
+        targetNavigationLevel = null
+        visitedPathNodeIds.clear()
+        
+        // Clear the user current floor indicator from floor selector
+        floorSelectorAdapter.setUserCurrentFloor(-1)
+        
         Toast.makeText(this, "Navigation path cleared", Toast.LENGTH_SHORT).show()
         Log.d(TAG, "Navigation path cleared")
     }
@@ -1463,15 +1447,442 @@ class MainActivity : AppCompatActivity() {
      */
     private fun clearPathLayers(style: Style) {
         try {
-            // Remove layers
+            // Remove future path layers
             style.getLayer(pathNodesLayerId)?.let { style.removeLayer(pathNodesLayerId) }
             style.getLayer(pathEdgesLayerId)?.let { style.removeLayer(pathEdgesLayerId) }
+            
+            // Remove past path layers
+            style.getLayer(pastPathNodesLayerId)?.let { style.removeLayer(pastPathNodesLayerId) }
+            style.getLayer(pastPathEdgesLayerId)?.let { style.removeLayer(pastPathEdgesLayerId) }
+            
+            // Remove transition indicators
+            style.getLayer(transitionIndicatorsLayerId)?.let { style.removeLayer(transitionIndicatorsLayerId) }
             
             // Remove sources
             style.getSource(pathNodesSourceId)?.let { style.removeSource(pathNodesSourceId) }
             style.getSource(pathEdgesSourceId)?.let { style.removeSource(pathEdgesSourceId) }
+            style.getSource(pastPathNodesSourceId)?.let { style.removeSource(pastPathNodesSourceId) }
+            style.getSource(pastPathEdgesSourceId)?.let { style.removeSource(pastPathEdgesSourceId) }
+            style.getSource(transitionIndicatorsSourceId)?.let { style.removeSource(transitionIndicatorsSourceId) }
         } catch (e: Exception) {
             Log.w(TAG, "Error clearing path layers", e)
+        }
+    }
+
+    /**
+     * Update navigation progress as user walks along the path
+     */
+    private fun updateNavigationProgress(currentNodeId: String?) {
+        try {
+            if (currentNodeId == null || currentNavigationPath == null) {
+                return
+            }
+
+            // Parse node ID to integer
+            val currentNodeIdInt = currentNodeId.toIntOrNull() ?: return
+
+            // Get all features from the current path
+            val features = currentNavigationPath?.features() ?: return
+
+            // Find if current node is in the path
+            val pathNodes = features.filter { it.getBooleanProperty("is_path_node") == true }
+            val isOnPath = pathNodes.any { feature ->
+                val nodeIdStr = feature.getStringProperty("id")
+                nodeIdStr?.toIntOrNull() == currentNodeIdInt
+            }
+
+            if (isOnPath) {
+                // Mark this node as visited
+                if (!visitedPathNodeIds.contains(currentNodeIdInt)) {
+                    visitedPathNodeIds.add(currentNodeIdInt)
+                    Log.d(TAG, "Node $currentNodeIdInt marked as visited (${visitedPathNodeIds.size} nodes visited)")
+                    
+                    // Redraw the path with updated visited nodes
+                    redrawPathWithProgress()
+                }
+
+                // Check if we reached the destination
+                checkIfDestinationReached(currentNodeIdInt)
+            }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Error updating navigation progress", e)
+        }
+    }
+
+    /**
+     * Check if user has reached their destination
+     */
+    private fun checkIfDestinationReached(currentNodeIdInt: Int) {
+        try {
+            val targetLevel = targetNavigationLevel ?: return
+
+            // Check if current node has the same level as target
+            lifecycleScope.launch {
+                try {
+                    val currentFloorId = nodeToFloorMap[currentNodeIdInt.toString()]
+                    if (currentFloorId == null) {
+                        return@launch
+                    }
+
+                    // Get route nodes for current floor to check node level
+                    val routeNodes = apiService.getRouteNodesByFloor(currentFloorId)
+                    val currentNode = routeNodes?.find { it.id == currentNodeIdInt }
+
+                    if (currentNode != null && currentNode.level == targetLevel) {
+                        Log.d(TAG, "Destination reached! Node $currentNodeIdInt has level $targetLevel")
+                        
+                        withContext(Dispatchers.Main) {
+                            // Show success message
+                            Toast.makeText(
+                                this@MainActivity,
+                                "✅ You have reached your destination (Level $targetLevel)!",
+                                Toast.LENGTH_LONG
+                            ).show()
+
+                            // Auto-clear the navigation
+                            clearPath()
+                        }
+                    }
+
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error checking destination", e)
+                }
+            }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in checkIfDestinationReached", e)
+        }
+    }
+
+    /**
+     * Redraw the path with visited nodes shown in gray, filtered by current floor
+     */
+    private fun redrawPathWithProgress() {
+        val style = mapLibreMap.style
+        if (style == null || !style.isFullyLoaded) {
+            return
+        }
+
+        try {
+            val features = currentNavigationPath?.features() ?: return
+            val currentFloorId = currentFloor?.id
+
+            if (currentFloorId == null) {
+                Log.w(TAG, "Cannot redraw path: no current floor")
+                return
+            }
+
+            // Separate into past and future nodes/edges, filtered by current floor
+            val pastNodes = mutableListOf<Feature>()
+            val futureNodes = mutableListOf<Feature>()
+            val pastEdges = mutableListOf<Feature>()
+            val futureEdges = mutableListOf<Feature>()
+
+            features.forEach { feature ->
+                val isPathNode = feature.getBooleanProperty("is_path_node") ?: false
+                val isPathEdge = feature.getBooleanProperty("is_path_edge") ?: false
+
+                if (isPathNode) {
+                    // Check if this node is on the current floor
+                    val nodeIdStr = feature.getStringProperty("id")
+                    val nodeId = nodeIdStr?.toIntOrNull()
+                    
+                    if (nodeId != null) {
+                        val nodeFloorId = nodeToFloorMap[nodeId.toString()]
+                        
+                        // Only add node if it's on the current floor
+                        if (nodeFloorId == currentFloorId) {
+                            if (visitedPathNodeIds.contains(nodeId)) {
+                                pastNodes.add(feature)
+                            } else {
+                                futureNodes.add(feature)
+                            }
+                        }
+                    }
+                } else if (isPathEdge) {
+                    // Check if both nodes of this edge are on the current floor
+                    val fromNodeId = feature.getNumberProperty("from_node_id")?.toInt()
+                    val toNodeId = feature.getNumberProperty("to_node_id")?.toInt()
+                    
+                    if (fromNodeId != null && toNodeId != null) {
+                        val fromFloorId = nodeToFloorMap[fromNodeId.toString()]
+                        val toFloorId = nodeToFloorMap[toNodeId.toString()]
+                        
+                        // Only add edge if both nodes are on the current floor
+                        if (fromFloorId == currentFloorId && toFloorId == currentFloorId) {
+                            if (visitedPathNodeIds.contains(fromNodeId) && 
+                                visitedPathNodeIds.contains(toNodeId)) {
+                                pastEdges.add(feature)
+                            } else {
+                                futureEdges.add(feature)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Clear existing path layers
+            clearPathLayers(style)
+
+            // Add past path edges (gray, faded)
+            if (pastEdges.isNotEmpty()) {
+                val pastEdgesCollection = FeatureCollection.fromFeatures(pastEdges)
+                val pastEdgesSource = GeoJsonSource(pastPathEdgesSourceId, pastEdgesCollection)
+                style.addSource(pastEdgesSource)
+
+                val pastEdgesLayer = LineLayer(pastPathEdgesLayerId, pastPathEdgesSourceId)
+                    .withProperties(
+                        lineColor("#888888"), // Gray for visited path
+                        lineWidth(5f),
+                        lineOpacity(0.5f)
+                    )
+                style.addLayer(pastEdgesLayer)
+            }
+
+            // Add past path nodes (gray, smaller)
+            if (pastNodes.isNotEmpty()) {
+                val pastNodesCollection = FeatureCollection.fromFeatures(pastNodes)
+                val pastNodesSource = GeoJsonSource(pastPathNodesSourceId, pastNodesCollection)
+                style.addSource(pastNodesSource)
+
+                val pastNodesLayer = CircleLayer(pastPathNodesLayerId, pastPathNodesSourceId)
+                    .withProperties(
+                        circleRadius(6f),
+                        circleColor("#888888"), // Gray for visited nodes
+                        circleStrokeColor("#FFFFFF"),
+                        circleStrokeWidth(1f),
+                        circleOpacity(0.6f)
+                    )
+                style.addLayer(pastNodesLayer)
+            }
+
+            // Add future path edges (orange-red, bright)
+            if (futureEdges.isNotEmpty()) {
+                val futureEdgesCollection = FeatureCollection.fromFeatures(futureEdges)
+                val futureEdgesSource = GeoJsonSource(pathEdgesSourceId, futureEdgesCollection)
+                style.addSource(futureEdgesSource)
+
+                val futureEdgesLayer = LineLayer(pathEdgesLayerId, pathEdgesSourceId)
+                    .withProperties(
+                        lineColor("#FF6B35"), // Orange-red for future path
+                        lineWidth(6f),
+                        lineOpacity(0.8f)
+                    )
+                style.addLayer(futureEdgesLayer)
+            }
+
+            // Add future path nodes (orange-red, bright)
+            if (futureNodes.isNotEmpty()) {
+                val futureNodesCollection = FeatureCollection.fromFeatures(futureNodes)
+                val futureNodesSource = GeoJsonSource(pathNodesSourceId, futureNodesCollection)
+                style.addSource(futureNodesSource)
+
+                val futureNodesLayer = CircleLayer(pathNodesLayerId, pathNodesSourceId)
+                    .withProperties(
+                        circleRadius(8f),
+                        circleColor("#FF6B35"), // Orange-red for future nodes
+                        circleStrokeColor("#FFFFFF"),
+                        circleStrokeWidth(2f),
+                        circleOpacity(0.9f)
+                    )
+                style.addLayer(futureNodesLayer)
+            }
+
+            Log.d(TAG, "Path redrawn for floor ${currentFloor?.name}: ${pastNodes.size} visited nodes, ${futureNodes.size} remaining nodes on this floor")
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Error redrawing path with progress", e)
+        }
+        
+        // Add floor transition indicators after path is drawn
+        addFloorTransitionIndicators(style, features, currentFloorId)
+    }
+
+    /**
+     * Add floor transition indicators next to stairs/elevators
+     */
+    private fun addFloorTransitionIndicators(style: Style, features: List<Feature>, currentFloorId: Int) {
+        lifecycleScope.launch {
+            try {
+                Log.d(TAG, "🔍 Looking for floor transitions on floor $currentFloorId...")
+                val transitionFeatures = mutableListOf<Feature>()
+                
+                // Fetch node data for current floor if not cached
+                val routeNodes = apiService.getRouteNodesByFloor(currentFloorId)
+                if (routeNodes == null || routeNodes.isEmpty()) {
+                    Log.w(TAG, "No route nodes found for floor $currentFloorId")
+                    return@launch
+                }
+                
+                // Cache node types
+                routeNodes.forEach { node ->
+                    nodeTypeCache[node.id] = node.nodeType
+                    Log.d(TAG, "Node ${node.id}: type=${node.nodeType}")
+                }
+                
+                // Get all path nodes
+                val pathNodes = features.filter { it.getBooleanProperty("is_path_node") == true }
+                Log.d(TAG, "Found ${pathNodes.size} path nodes to check")
+                
+                // Find transition nodes (stairs/elevators) on current floor
+                pathNodes.forEach { feature ->
+                    val nodeIdStr = feature.getStringProperty("id")
+                    val nodeId = nodeIdStr?.toIntOrNull()
+                    
+                    if (nodeId != null) {
+                        val nodeFloorId = nodeToFloorMap[nodeId.toString()]
+                        
+                        // Only process nodes on current floor
+                        if (nodeFloorId == currentFloorId) {
+                            val nodeType = nodeTypeCache[nodeId]
+                            
+                            Log.d(TAG, "Checking node $nodeId (type: $nodeType)")
+                            
+                            if (nodeType?.contains("stair", ignoreCase = true) == true || 
+                                nodeType?.contains("elevator", ignoreCase = true) == true) {
+                                
+                                Log.d(TAG, "✅ Found transition node: $nodeId ($nodeType)")
+                                
+                                // This is a transition node - find connected nodes on different floors
+                                val connectedFloors = findConnectedFloors(nodeId, features)
+                                
+                                if (connectedFloors.isNotEmpty()) {
+                                    Log.d(TAG, "  Connected to ${connectedFloors.size} other floors")
+                                    
+                                    // Get the geometry from the feature
+                                    val geometry = feature.geometry()
+                                    if (geometry is Point) {
+                                        connectedFloors.forEach { (targetFloorId, direction) ->
+                                            // Get floor number
+                                            val targetFloor = floors.find { it.id == targetFloorId }
+                                            if (targetFloor != null) {
+                                                // Create indicator feature
+                                                val indicator = Feature.fromGeometry(geometry)
+                                                val text = "$direction F${targetFloor.floorNumber}"
+                                                indicator.addStringProperty("text", text)
+                                                indicator.addStringProperty("direction", direction)
+                                                indicator.addNumberProperty("targetFloor", targetFloor.floorNumber)
+                                                transitionFeatures.add(indicator)
+                                                
+                                                Log.d(TAG, "  📍 Creating indicator: '$text' at (${geometry.coordinates()[0]}, ${geometry.coordinates()[1]})")
+                                            }
+                                        }
+                                    } else {
+                                        Log.w(TAG, "  ⚠️ Node geometry is not a Point: ${geometry?.type()}")
+                                    }
+                                } else {
+                                    Log.d(TAG, "  ⚠️ No connected floors found")
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Add all indicators at once on main thread
+                if (transitionFeatures.isNotEmpty()) {
+                    Log.d(TAG, "🎯 Adding ${transitionFeatures.size} transition indicators to map")
+                    withContext(Dispatchers.Main) {
+                        addTransitionIndicatorsToMap(style, transitionFeatures)
+                    }
+                } else {
+                    Log.w(TAG, "⚠️ No transition indicators found to display")
+                }
+                
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Error adding floor transition indicators", e)
+            }
+        }
+    }
+
+    /**
+     * Find floors connected to this node via edges
+     */
+    private fun findConnectedFloors(nodeId: Int, features: List<Feature>): List<Pair<Int, String>> {
+        val connectedFloors = mutableListOf<Pair<Int, String>>()
+        val currentFloorId = nodeToFloorMap[nodeId.toString()] ?: return connectedFloors
+        
+        // Find all edges connected to this node
+        features.filter { it.getBooleanProperty("is_path_edge") == true }.forEach { edge ->
+            val fromNodeId = edge.getNumberProperty("from_node_id")?.toInt()
+            val toNodeId = edge.getNumberProperty("to_node_id")?.toInt()
+            
+            if (fromNodeId == nodeId || toNodeId == nodeId) {
+                val connectedNodeId = if (fromNodeId == nodeId) toNodeId else fromNodeId
+                if (connectedNodeId != null) {
+                    val connectedFloorId = nodeToFloorMap[connectedNodeId.toString()]
+                    
+                    if (connectedFloorId != null && connectedFloorId != currentFloorId) {
+                        // Determine direction
+                        val currentFloor = floors.find { it.id == currentFloorId }
+                        val connectedFloor = floors.find { it.id == connectedFloorId }
+                        
+                        if (currentFloor != null && connectedFloor != null) {
+                            val direction = if (connectedFloor.floorNumber > currentFloor.floorNumber) "↑" else "↓"
+                            
+                            // Avoid duplicates
+                            if (!connectedFloors.any { it.first == connectedFloorId }) {
+                                connectedFloors.add(Pair(connectedFloorId, direction))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        return connectedFloors
+    }
+
+    /**
+     * Add transition indicators to the map
+     */
+    private fun addTransitionIndicatorsToMap(style: Style, indicators: List<Feature>) {
+        try {
+            if (indicators.isEmpty()) {
+                Log.d(TAG, "No transition indicators to add")
+                return
+            }
+            
+            // Remove existing layer and source
+            style.getLayer(transitionIndicatorsLayerId)?.let { 
+                style.removeLayer(transitionIndicatorsLayerId)
+                Log.d(TAG, "Removed existing transition indicators layer")
+            }
+            style.getSource(transitionIndicatorsSourceId)?.let { 
+                style.removeSource(transitionIndicatorsSourceId)
+                Log.d(TAG, "Removed existing transition indicators source")
+            }
+            
+            // Create feature collection
+            val featureCollection = FeatureCollection.fromFeatures(indicators)
+            val source = GeoJsonSource(transitionIndicatorsSourceId, featureCollection)
+            style.addSource(source)
+            
+            // Add symbol layer for text with high visibility
+            val textLayer = org.maplibre.android.style.layers.SymbolLayer(transitionIndicatorsLayerId, transitionIndicatorsSourceId)
+                .withProperties(
+                    PropertyFactory.textField(get("text")),
+                    PropertyFactory.textSize(20f), // Larger text
+                    PropertyFactory.textColor("#FFFFFF"),
+                    PropertyFactory.textHaloColor("#FF0000"), // Red halo for high visibility
+                    PropertyFactory.textHaloWidth(3f), // Thicker halo
+                    PropertyFactory.textHaloBlur(1f),
+                    PropertyFactory.textOffset(arrayOf(0f, -2.5f)),
+                    PropertyFactory.textAnchor("bottom"),
+                    PropertyFactory.textAllowOverlap(true), // Always show
+                    PropertyFactory.textIgnorePlacement(true), // Ignore collision
+                    PropertyFactory.iconAllowOverlap(true),
+                    PropertyFactory.textOptional(false) // Text is required
+                )
+            style.addLayer(textLayer)
+            
+            Log.d(TAG, "✅ Added ${indicators.size} transition indicators to map")
+            indicators.forEach { indicator ->
+                Log.d(TAG, "  - Indicator: ${indicator.getStringProperty("text")} at ${indicator.geometry()}")
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error adding transition indicators to map", e)
         }
     }
 
@@ -1554,26 +1965,35 @@ class MainActivity : AppCompatActivity() {
                     // Update blue dot on map
                     updateLocalizationMarker(x, y, confidence)
                     
-                    // Check for automatic floor switching
-                    if (nodeId != null && confidence > 0.6) { // Only switch if we're confident
+                    // Update navigation path progress
+                    updateNavigationProgress(nodeId)
+                    
+                    // Update floor selector to show current physical floor indicator
+                    if (nodeId != null && confidence > 0.6) {
                         val detectedFloorId = nodeToFloorMap[nodeId]
-                        val currentFloorId = currentFloor?.id
-                        
-                        if (detectedFloorId != null && currentFloorId != null && detectedFloorId != currentFloorId) {
-                            Log.d(TAG, "Floor change detected: current=$currentFloorId, detected=$detectedFloorId")
+                        if (detectedFloorId != null) {
+                            withContext(Dispatchers.Main) {
+                                floorSelectorAdapter.setUserCurrentFloor(detectedFloorId)
+                            }
                             
-                            // Find the floor to switch to
-                            val targetFloor = floors.find { it.id == detectedFloorId }
-                            if (targetFloor != null) {
-                                Log.d(TAG, "Auto-switching to floor: ${targetFloor.name}")
-                                withContext(Dispatchers.Main) {
-                                    // Simulate floor button click
-                                    onFloorSelected(targetFloor)
-                                    Toast.makeText(
-                                        this@MainActivity, 
-                                        "Auto-switched to ${targetFloor.name}", 
-                                        Toast.LENGTH_SHORT
-                                    ).show()
+                            // Auto-switch ONLY if user is navigating AND is on wrong floor display
+                            val currentFloorId = currentFloor?.id
+                            if (currentNavigationPath != null && currentFloorId != null && detectedFloorId != currentFloorId) {
+                                Log.d(TAG, "User physically on different floor: current view=$currentFloorId, actual=$detectedFloorId")
+                                
+                                // Find the floor to switch to
+                                val targetFloor = floors.find { it.id == detectedFloorId }
+                                if (targetFloor != null) {
+                                    Log.d(TAG, "Auto-switching to floor: ${targetFloor.name}")
+                                    withContext(Dispatchers.Main) {
+                                        // Simulate floor button click
+                                        onFloorSelected(targetFloor)
+                                        Toast.makeText(
+                                            this@MainActivity, 
+                                            "📍 You're now on ${targetFloor.name}", 
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
                                 }
                             }
                         }
@@ -1585,6 +2005,16 @@ class MainActivity : AppCompatActivity() {
                         currentFloor?.let { floor ->
                             Log.d(TAG, "Position initially found - requesting assignment")
                             requestInitialAssignment(floor.id)
+                        }
+                    }
+
+                    // Navigate to assigned level if we have both assignment and trilaterated position
+                    if (!hasNavigatedToAssignedLevel && nodeId != null && confidence > 0.5) {
+                        val assignment = currentAssignment
+                        if (assignment != null && assignment.level != null) {
+                            Log.d(TAG, "Both assignment and trilateration ready - triggering navigation")
+                            hasNavigatedToAssignedLevel = true
+                            navigateToAssignedLevel(assignment)
                         }
                     }
                 } else {
@@ -1768,6 +2198,8 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 currentAssignment = assignment
+                // Reset navigation flag to allow re-navigation with new assignment
+                hasNavigatedToAssignedLevel = false
                 displayAssignment(assignment)
                 Toast.makeText(this@MainActivity, "New assignment received", Toast.LENGTH_SHORT).show()
                 Log.d(TAG, "New assignment received: age=${assignment.age}, disabled=${assignment.isDisabled}, level=${assignment.level}")
@@ -1803,44 +2235,144 @@ class MainActivity : AppCompatActivity() {
      */
     private fun displayAssignment(assignment: UserAssignment) {
         try {
-            Log.d(TAG, "displayAssignment called: floorId=${assignment.floorId}, level=${assignment.level}, age=${assignment.age}, isDisabled=${assignment.isDisabled}")
-            Log.d(TAG, "Current floor: id=${currentFloor?.id}, number=${currentFloor?.floorNumber}, name=${currentFloor?.name}")
-            Log.d(TAG, "Available floors: ${floors.map { "id=${it.id}, num=${it.floorNumber}, name=${it.name}" }}")
-            
-            // Look up the floor number from the assignment's floorId
-            val floorNumber = if (assignment.floorId != null) {
-                val floor = floors.find { it.id == assignment.floorId }
-                if (floor != null) {
-                    Log.d(TAG, "Found floor for assignment: floorId=${assignment.floorId}, floorNumber=${floor.floorNumber}, name=${floor.name}")
-                    floor.floorNumber
-                } else {
-                    Log.e(TAG, "CRITICAL: No floor found with id=${assignment.floorId}. Available floors: ${floors.map { "id=${it.id}, number=${it.floorNumber}" }}")
-                    Log.e(TAG, "Falling back to currentFloor?.floorNumber: ${currentFloor?.floorNumber}")
-                    currentFloor?.floorNumber ?: 1 // Default to 1 instead of 0
-                }
-            } else {
-                Log.e(TAG, "CRITICAL: Assignment has no floorId! Using currentFloor: id=${currentFloor?.id}, number=${currentFloor?.floorNumber}")
-                currentFloor?.floorNumber ?: 1 // Default to 1 instead of 0
-            }
+            Log.d(TAG, "displayAssignment called: level=${assignment.level}, age=${assignment.age}, isDisabled=${assignment.isDisabled}")
             
             val healthEmoji = assignment.getHealthStatusEmoji()
-
-            // Compact format: 🚶 F2 | 45 | ✅
-            // Or: ♿ F3 | 72 | ⚠️
             val statusEmoji = if (assignment.isDisabled) "⚠️" else "✅"
-
-            val infoText = "$healthEmoji F$floorNumber | ${assignment.age} | $statusEmoji"
+            
+            // Show assigned accessibility LEVEL (L1, L2, L3) - this is what you've been assigned
+            val level = assignment.level ?: 1
+            val infoText = "$healthEmoji L$level | ${assignment.age} | $statusEmoji"
 
             assignmentInfoText.text = infoText
             assignmentInfoContainer.visibility = View.VISIBLE
 
-            Log.d(TAG, "Assignment displayed: $infoText (floorId=${assignment.floorId}, level=${assignment.level}, accessibilityLevel=${assignment.level})")
+            Log.d(TAG, "Assignment displayed: $infoText (level=$level)")
 
-            // Draw path to nearest node with correct accessibility level
-            drawPathToAccessibilityLevel(assignment)
+            // Navigate user to their assigned level after trilateration
+            navigateToAssignedLevel(assignment)
 
         } catch (e: Exception) {
             Log.e(TAG, "Error displaying assignment", e)
+        }
+    }
+
+    /**
+     * Update assignment display - ONLY used to refresh the display, not to change the level
+     * The level is static and comes from the assignment, NOT from trilateration
+     */
+    private fun updateAssignmentDisplay() {
+        try {
+            val assignment = currentAssignment
+            if (assignment == null || assignmentInfoContainer.visibility != View.VISIBLE) {
+                return
+            }
+
+            // Show the assigned accessibility LEVEL (L1, L2, L3) - this is STATIC
+            val level = assignment.level ?: 1
+            
+            val healthEmoji = assignment.getHealthStatusEmoji()
+            val statusEmoji = if (assignment.isDisabled) "⚠️" else "✅"
+            val infoText = "$healthEmoji L$level | ${assignment.age} | $statusEmoji"
+
+            // Only update if text changed
+            if (assignmentInfoText.text != infoText) {
+                assignmentInfoText.text = infoText
+                Log.d(TAG, "Assignment display: $infoText")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error updating assignment display", e)
+        }
+    }
+
+    /**
+     * Get the current floor number based on trilaterated position
+     */
+    private fun getFloorNumberFromTrilateration(): Int? {
+        try {
+            // Get current node from trilateration
+            val currentNodeId = localizationController.localizationState.value.currentNodeId
+            if (currentNodeId == null) {
+                Log.d(TAG, "getFloorNumberFromTrilateration: No current node yet")
+                return null
+            }
+
+            // Look up floor ID from node-to-floor mapping
+            val floorId = nodeToFloorMap[currentNodeId]
+            if (floorId == null) {
+                Log.w(TAG, "getFloorNumberFromTrilateration: No floor mapping for node $currentNodeId")
+                return null
+            }
+
+            // Find the floor object and return its floor number
+            val floor = floors.find { it.id == floorId }
+            if (floor == null) {
+                Log.w(TAG, "getFloorNumberFromTrilateration: No floor found for floorId $floorId")
+                return null
+            }
+            
+            Log.d(TAG, "getFloorNumberFromTrilateration: node=$currentNodeId -> floorId=$floorId -> floorNumber=${floor.floorNumber}")
+            return floor.floorNumber
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting floor number from trilateration", e)
+            return null
+        }
+    }
+
+    /**
+     * Navigate user to their assigned level using trilaterated position
+     */
+    private fun navigateToAssignedLevel(assignment: UserAssignment) {
+        lifecycleScope.launch {
+            try {
+                // Get current node ID from localization (trilateration result)
+                val currentNodeId = localizationController.localizationState.value.currentNodeId
+                val targetLevel = assignment.level
+
+                if (currentNodeId == null) {
+                    Log.w(TAG, "Current node ID not available yet, waiting for trilateration...")
+                    // Fall back to the old method
+                    drawPathToAccessibilityLevel(assignment)
+                    return@launch
+                }
+
+                if (targetLevel == null) {
+                    Log.w(TAG, "Target level not available in assignment")
+                    // Fall back to the old method
+                    drawPathToAccessibilityLevel(assignment)
+                    return@launch
+                }
+
+                // Parse node ID to integer
+                val currentNodeIdInt = currentNodeId.toIntOrNull()
+                if (currentNodeIdInt == null) {
+                    Log.e(TAG, "Failed to parse current node ID: $currentNodeId")
+                    // Fall back to the old method
+                    drawPathToAccessibilityLevel(assignment)
+                    return@launch
+                }
+
+                Log.d(TAG, "Navigating to assigned level: currentNodeId=$currentNodeIdInt, targetLevel=$targetLevel")
+
+                // Call the navigateToLevel API
+                val pathFeatureCollection = apiService.navigateToLevel(currentNodeIdInt, targetLevel)
+
+                if (pathFeatureCollection != null) {
+                    Log.d(TAG, "Navigation path received with ${pathFeatureCollection.features()?.size ?: 0} features")
+                    displayPath(pathFeatureCollection, targetLevel)
+                    fabClearPath.visibility = View.VISIBLE
+                    Toast.makeText(this@MainActivity, "Navigation to Level $targetLevel", Toast.LENGTH_SHORT).show()
+                } else {
+                    Log.w(TAG, "No path found to assigned level, falling back to accessibility-based navigation")
+                    // Fall back to the old method
+                    drawPathToAccessibilityLevel(assignment)
+                }
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Error navigating to assigned level", e)
+                // Fall back to the old method
+                drawPathToAccessibilityLevel(assignment)
+            }
         }
     }
 
@@ -1911,7 +2443,7 @@ class MainActivity : AppCompatActivity() {
                 val pathFeatureCollection = apiService.findPath(pathRequest)
 
                 if (pathFeatureCollection != null) {
-                    displayPath(pathFeatureCollection)
+                    displayPath(pathFeatureCollection, requiredLevel)
                     fabClearPath.visibility = View.VISIBLE
                     Toast.makeText(this@MainActivity, "Path to accessibility level $requiredLevel", Toast.LENGTH_SHORT).show()
                     Log.d(TAG, "Path to accessibility level $requiredLevel displayed")
