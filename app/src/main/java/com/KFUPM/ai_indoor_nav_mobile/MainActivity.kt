@@ -81,6 +81,7 @@ class MainActivity : AppCompatActivity() {
 
     private var currentAssignment: UserAssignment? = null
     private var hasRequestedInitialAssignment = false
+    private var hasAutoClickedAssignment = false // Track if we've auto-clicked the assignment button once
     
     // Mapping of node ID to floor ID for automatic floor switching
     private val nodeToFloorMap = mutableMapOf<String, Int>()
@@ -399,6 +400,19 @@ class MainActivity : AppCompatActivity() {
                 
                 // Initialize localization for this floor
                 initializeLocalization(floor.id)
+                
+                // Auto-click assignment button after first floor is fully loaded (only once at startup)
+                if (!hasAutoClickedAssignment) {
+                    hasAutoClickedAssignment = true
+                    delay(1000) // Give localization time to initialize
+                    withContext(Dispatchers.Main) {
+                        Log.d(TAG, "=== AUTO-CLICKING ASSIGNMENT BUTTON ===")
+                        Log.d(TAG, "currentFloor: id=${currentFloor?.id}, number=${currentFloor?.floorNumber}, name=${currentFloor?.name}")
+                        Log.d(TAG, "floors: ${floors.map { "id=${it.id}, num=${it.floorNumber}" }}")
+                        Toast.makeText(this@MainActivity, "🔄 Auto-requesting assignment...", Toast.LENGTH_LONG).show()
+                        fabAssignment.performClick()
+                    }
+                }
 
             } catch (e: Exception) {
                 Log.e(TAG, "Error loading floor data", e)
@@ -1497,14 +1511,6 @@ class MainActivity : AppCompatActivity() {
 
                     Log.d(TAG, "Localization started successfully")
                     Toast.makeText(this@MainActivity, "Indoor positioning active", Toast.LENGTH_SHORT).show()
-                    
-                    // Simulate assignment button click after localization starts
-                    // Wait a bit to ensure floors are loaded
-                    withContext(Dispatchers.Main) {
-                        delay(500) // Wait 500ms for initialization
-                        Log.d(TAG, "Auto-clicking assignment button: currentFloor=${currentFloor?.name}, floors.size=${floors.size}")
-                        fabAssignment.performClick()
-                    }
                 } else {
                     Log.w(TAG, "Auto-initialization failed, trying manual initialization...")
 
@@ -1518,14 +1524,6 @@ class MainActivity : AppCompatActivity() {
                         observeLocalizationUpdates()
 
                         Log.d(TAG, "Localization started with manual initialization")
-                        
-                        // Simulate assignment button click after localization starts
-                        // Wait a bit to ensure floors are loaded
-                        withContext(Dispatchers.Main) {
-                            delay(500) // Wait 500ms for initialization
-                            Log.d(TAG, "Auto-clicking assignment button (manual init): currentFloor=${currentFloor?.name}, floors.size=${floors.size}")
-                            fabAssignment.performClick()
-                        }
                     } else {
                         Log.e(TAG, "Failed to initialize localization")
                     }

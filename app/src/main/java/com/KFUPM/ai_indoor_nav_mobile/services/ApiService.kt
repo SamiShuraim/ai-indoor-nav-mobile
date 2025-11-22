@@ -67,7 +67,9 @@ class ApiService {
                         if (jsonString != null) {
                             Log.d(TAG, "Floors response: $jsonString")
                             val type = object : TypeToken<List<Floor>>() {}.type
-                            gson.fromJson<List<Floor>>(jsonString, type)
+                            val floors = gson.fromJson<List<Floor>>(jsonString, type)
+                            Log.d(TAG, "Parsed ${floors?.size} floors: ${floors?.map { "id=${it.id}, floorNumber=${it.floorNumber}, name=${it.name}" }}")
+                            floors
                         } else null
                     } else {
                         Log.e(TAG, "Failed to fetch floors: ${response.code}")
