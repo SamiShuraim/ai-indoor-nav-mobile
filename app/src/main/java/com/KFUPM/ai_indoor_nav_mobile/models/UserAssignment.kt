@@ -34,14 +34,52 @@ data class UserAssignment(
 }
 
 /**
- * Assignment request to backend
+ * Assignment request to backend (Load Balancer format)
  */
 data class AssignmentRequest(
-    @SerializedName("floorId")
-    val floorId: Int,
+    @SerializedName("level")
+    val level: Int,
     
-    @SerializedName("position")
-    val position: Position
+    @SerializedName("visitorId")
+    val visitorId: String,
+    
+    @SerializedName("decision")
+    val decision: AssignmentDecision,
+    
+    @SerializedName("traceId")
+    val traceId: String? = null
+)
+
+/**
+ * Assignment decision details
+ */
+data class AssignmentDecision(
+    @SerializedName("isDisabled")
+    val isDisabled: Boolean,
+    
+    @SerializedName("age")
+    val age: Int,
+    
+    @SerializedName("ageCutoff")
+    val ageCutoff: Int? = null,
+    
+    @SerializedName("alpha1")
+    val alpha1: Double? = null,
+    
+    @SerializedName("pDisabled")
+    val pDisabled: Double? = null,
+    
+    @SerializedName("shareLeftForOld")
+    val shareLeftForOld: Double? = null,
+    
+    @SerializedName("tauQuantile")
+    val tauQuantile: Double? = null,
+    
+    @SerializedName("occupancy")
+    val occupancy: Map<String, Int>? = null,
+    
+    @SerializedName("reason")
+    val reason: String? = null
 )
 
 /**
