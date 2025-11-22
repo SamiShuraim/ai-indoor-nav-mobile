@@ -62,7 +62,7 @@ class ConfigProvider(private val context: Context) {
                             val locBeacons = beacons.mapNotNull { beacon ->
                                 val macAddress = when {
                                     // First priority: uuid field from database
-                                    !beacon.uuid.isNullOrBlank() -> beacon.uuid.uppercase()
+                                    !beacon.uuid.isNullOrBlank() -> beacon.uuid!!.uppercase()
                                     // Second priority: mapped MAC from beacon name
                                     beacon.name != null && nameToMacMap.containsKey(beacon.name) -> {
                                         val mappedMac = nameToMacMap[beacon.name]!!

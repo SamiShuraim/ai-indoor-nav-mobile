@@ -108,27 +108,15 @@ class MainActivity : AppCompatActivity() {
             }
         }
     
-    private val poiSearchLauncher = 
+    private val poiSearchLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == Activity.RESULT_OK) {
                 val data = result.data
                 val poiId = data?.getIntExtra("poi_id", -1)
                 val poiName = data?.getStringExtra("poi_name")
-                
+
                 if (poiId != null && poiId != -1 && poiName != null) {
                     Log.d(TAG, "POI selected: $poiName (ID: $poiId)")
-                    handleNavigationToPOI(poiId, poiName)
-                }
-            }
-        }
-
-    private val poiSearchLauncher =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            if (result.resultCode == Activity.RESULT_OK) {
-                val poiId = result.data?.getIntExtra("poi_id", -1) ?: -1
-                val poiName = result.data?.getStringExtra("poi_name") ?: "Unknown POI"
-                
-                if (poiId != -1) {
                     handleNavigationToPOI(poiId, poiName)
                 }
             }
