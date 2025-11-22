@@ -3,30 +3,37 @@ package com.KFUPM.ai_indoor_nav_mobile.models
 import com.google.gson.annotations.SerializedName
 
 data class Floor(
-    @SerializedName("Id")
+    @SerializedName("id")
     val id: Int,
     
-    @SerializedName("BuildingId")
+    @SerializedName("buildingId")
     val buildingId: Int,
     
-    @SerializedName("Name")
+    @SerializedName("name")
     val name: String,
     
-    @SerializedName("FloorNumber")
-    val floorNumber: Int,
+    @SerializedName("floorNumber")
+    private val _floorNumber: Int,
     
-    @SerializedName("CreatedAt")
+    @SerializedName("createdAt")
     val createdAt: String? = null,
     
-    @SerializedName("UpdatedAt")
+    @SerializedName("updatedAt")
     val updatedAt: String? = null,
     
-    @SerializedName("Pois")
+    @SerializedName("pois")
     val pois: List<POI>? = null,
     
-    @SerializedName("Beacons")
+    @SerializedName("beacons")
     val beacons: List<Beacon>? = null,
     
-    @SerializedName("RouteNodes")
+    @SerializedName("routeNodes")
     val routeNodes: List<RouteNode>? = null
-)
+) {
+    /**
+     * Display floor number (adds 1 to 0-indexed backend value)
+     * Backend: 0, 1, 2 -> Display: 1, 2, 3
+     */
+    val floorNumber: Int
+        get() = _floorNumber + 1
+}
