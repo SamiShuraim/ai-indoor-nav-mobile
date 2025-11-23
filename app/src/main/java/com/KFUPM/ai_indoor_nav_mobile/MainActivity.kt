@@ -2062,18 +2062,31 @@ class MainActivity : AppCompatActivity() {
                     Log.d(TAG, "Localization: node=$nodeId, pos=($x, $y), confidence=${String.format("%.2f", confidence)}")
                     
                     // SIMPLE FLOOR DETECTION: If nearest 3 nodes are from Floor X, you're on Floor X
-                    val topNodes = localizationController.getTopNodes(3)
+                    val topNodes = localizationController.getTopNodes(5)  // Get top 5 for better accuracy
                     val detectedFloorId = if (topNodes.isNotEmpty()) {
-                        // Get floor IDs for top 3 nodes
-                        val floorIds = topNodes.mapNotNull { nodeToFloorMap[it] }
+                        // Get floor IDs for top nodes
+                        val floorIds = topNodes.mapNotNull { nodeId ->
+                            val floorId = nodeToFloorMap[nodeId]
+                            if (floorId == null) {
+                                Log.w(TAG, "⚠️ Node $nodeId has no floor mapping!")
+                            }
+                            floorId
+                        }
                         
-                        // Count which floor appears most
+                        // Count which floor appears most (majority vote)
                         val floorCounts = floorIds.groupingBy { it }.eachCount()
                         val mostCommonFloor = floorCounts.maxByOrNull { it.value }?.key
                         
-                        Log.d(TAG, "Top nodes: $topNodes, Floor IDs: $floorIds, Detected floor: $mostCommonFloor")
+                        Log.d(TAG, "🔍 Floor Detection:")
+                        Log.d(TAG, "  Top 5 nodes: $topNodes")
+                        Log.d(TAG, "  Floor IDs: $floorIds")
+                        Log.d(TAG, "  Floor counts: $floorCounts")
+                        Log.d(TAG, "  Detected floor: $mostCommonFloor")
+                        Log.d(TAG, "  Current displayed floor: $currentDisplayedFloorId")
+                        
                         mostCommonFloor
                     } else {
+                        Log.w(TAG, "⚠️ No top nodes available for floor detection")
                         null
                     }
                     
@@ -2086,20 +2099,32 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                     
-                    // AUTO-SWITCH FLOOR IMMEDIATELY when detected floor changes
+                    // AUTO-SWITCH FLOOR when detected floor changes
+                    // Require strong evidence (at least 3 out of 5 top nodes from target floor)
                     if (detectedFloorId != null && detectedFloorId != currentDisplayedFloorId) {
-                        Log.d(TAG, "🚶 FLOOR CHANGED: $currentDisplayedFloorId → $detectedFloorId")
+                        val floorIds = topNodes.take(5).mapNotNull { nodeToFloorMap[it] }
+                        val targetFloorCount = floorIds.count { it == detectedFloorId }
+                        val totalCount = floorIds.size
                         
-                        val newFloor = floors.find { it.id == detectedFloorId }
-                        if (newFloor != null) {
-                            Log.d(TAG, "🔄 SWITCHING to floor: ${newFloor.name}")
-                            withContext(Dispatchers.Main) {
-                                selectFloor(newFloor)
-                                
-                                if (currentDisplayedFloorId != null) {
-                                    Toast.makeText(this@MainActivity, "🚶 ${newFloor.name}", Toast.LENGTH_SHORT).show()
+                        // Only switch if we have strong evidence (>= 60% of nodes from target floor)
+                        val floorChangeConfidence = if (totalCount > 0) targetFloorCount.toDouble() / totalCount else 0.0
+                        
+                        if (floorChangeConfidence >= 0.6) {  // At least 3 out of 5 nodes
+                            Log.d(TAG, "🚶 FLOOR CHANGED: $currentDisplayedFloorId → $detectedFloorId (confidence: ${String.format("%.1f%%", floorChangeConfidence * 100)})")
+                            
+                            val newFloor = floors.find { it.id == detectedFloorId }
+                            if (newFloor != null) {
+                                Log.d(TAG, "🔄 SWITCHING to floor: ${newFloor.name}")
+                                withContext(Dispatchers.Main) {
+                                    selectFloor(newFloor)
+                                    
+                                    if (currentDisplayedFloorId != null) {
+                                        Toast.makeText(this@MainActivity, "🚶 ${newFloor.name}", Toast.LENGTH_SHORT).show()
+                                    }
                                 }
                             }
+                        } else {
+                            Log.d(TAG, "⏸️ Floor change pending: $currentDisplayedFloorId → $detectedFloorId (confidence too low: ${String.format("%.1f%%", floorChangeConfidence * 100)})")
                         }
                     }
                     

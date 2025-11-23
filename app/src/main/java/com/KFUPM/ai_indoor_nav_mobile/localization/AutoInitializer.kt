@@ -82,7 +82,7 @@ class AutoInitializer(
                 return null
             }
             
-            Log.d(TAG, "Determined floor: $floorId")
+            Log.d(TAG, "✅ AUTO-INIT: Determined floor: $floorId")
             
             // Step 4: Fetch COMBINED graph and config for ALL floors
             val graph = configProvider.fetchCombinedGraph(availableFloorIds)
@@ -99,11 +99,20 @@ class AutoInitializer(
             Log.d(TAG, "✅ Loaded combined graph with ${graph.nodes.size} nodes, ${graph.edges.size} edges")
             Log.d(TAG, "✅ Loaded ${allBeacons.size} beacons from ALL ${availableFloorIds.size} floors")
             
-            // Step 5: Estimate initial node (use beacons from detected floor only for initial position)
+            // Step 5: Estimate initial node
+            // CRITICAL: Only use beacons AND nodes from the detected floor for initial position
             val detectedFloorBeacons = floorBeacons[floorId]!!
-            val (initialNode, confidence) = estimateInitialNode(rssiMap, detectedFloorBeacons, graph)
             
-            Log.d(TAG, "Initial position: node=${initialNode}, confidence=${String.format("%.2f", confidence)}")
+            // Get graph for ONLY the detected floor (not combined graph)
+            val detectedFloorGraph = configProvider.fetchGraph(floorId)
+            if (detectedFloorGraph == null || detectedFloorGraph.nodes.isEmpty()) {
+                Log.e(TAG, "No graph nodes for detected floor $floorId")
+                return null
+            }
+            
+            val (initialNode, confidence) = estimateInitialNode(rssiMap, detectedFloorBeacons, detectedFloorGraph)
+            
+            Log.d(TAG, "✅ AUTO-INIT: Initial node=${initialNode} on floor $floorId, confidence=${String.format("%.2f", confidence)}")
             
             AutoInitResult(
                 floorId = floorId,
@@ -178,17 +187,21 @@ class AutoInitializer(
                 totalBeacons = beacons.size
             )
             
-            Log.d(TAG, "Floor $floorId: $matchCount matches, $mismatchCount mismatches, avg RSSI: ${String.format("%.1f", avgRssi)}")
+            val score = score.matchCount * 10.0 + (score.avgRssi + 100) / 10.0 - score.mismatchCount * 2.0
+            Log.d(TAG, "Floor $floorId: $matchCount matches, $mismatchCount mismatches, avg RSSI: ${String.format("%.1f", avgRssi)}, SCORE: ${String.format("%.2f", score)}")
         }
         
         // Select floor with best score
-        return floorScores.maxByOrNull { (_, score) ->
+        val selectedFloor = floorScores.maxByOrNull { (_, score) ->
             // Prioritize floors with:
             // 1. More matching beacons (high match count)
             // 2. Stronger average signal (higher avgRssi)
             // 3. Fewer mismatches
             score.matchCount * 10.0 + (score.avgRssi + 100) / 10.0 - score.mismatchCount * 2.0
         }?.key
+        
+        Log.d(TAG, "🎯 SELECTED FLOOR: $selectedFloor")
+        return selectedFloor
     }
     
     /**
