@@ -78,7 +78,7 @@ class LocalizationController(private val context: Context) {
                 // Update config
                 config = result.config
                 currentFloorId = result.floorId
-                availableFloorIds = availableFloorIds
+                this.availableFloorIds = availableFloorIds
                 
                 // Initialize components
                 graphModel = GraphModel(result.graph)
