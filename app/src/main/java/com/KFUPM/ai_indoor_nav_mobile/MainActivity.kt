@@ -84,6 +84,7 @@ class MainActivity : AppCompatActivity() {
     private var hasRequestedInitialAssignment = false
     private var hasAutoClickedAssignment = false // Track if we've auto-clicked the assignment button once
     private var hasNavigatedToAssignedLevel = false // Track if we've navigated to the assigned level
+    private var hasInitializedMultiFloorLocalization = false // Track if we've done initial multi-floor localization
     
     // Mapping of node ID to floor ID for automatic floor switching
     private val nodeToFloorMap = mutableMapOf<String, Int>()
@@ -270,6 +271,9 @@ class MainActivity : AppCompatActivity() {
                 // Load node-to-floor mappings for all floors to enable automatic floor switching
                 loadNodeToFloorMappings()
                 
+                // Load beacons from all floors for initial trilateration
+                loadAllBeaconsForTrilateration()
+                
             } catch (e: Exception) {
                 Log.e(TAG, "Error initializing app data", e)
                 showRetryButton()
@@ -303,6 +307,39 @@ class MainActivity : AppCompatActivity() {
             Log.d(TAG, "Loaded ${nodeToFloorMap.size} node-to-floor mappings across ${floors.size} floors")
         } catch (e: Exception) {
             Log.e(TAG, "Error loading node-to-floor mappings", e)
+        }
+    }
+    
+    /**
+     * Load beacons from all floors for initial trilateration
+     * This allows the system to determine which floor the user is on at startup
+     */
+    private suspend fun loadAllBeaconsForTrilateration() {
+        try {
+            Log.d(TAG, "Loading beacons from all floors for trilateration...")
+            
+            // Load beacons for each floor in parallel
+            val allBeacons = coroutineScope {
+                floors.map { floor ->
+                    async { 
+                        apiService.getBeaconsByFloor(floor.id)?.also { beacons ->
+                            Log.d(TAG, "Loaded ${beacons.size} beacons for floor ${floor.name}")
+                        }
+                    }
+                }.awaitAll().filterNotNull().flatten()
+            }
+            
+            Log.d(TAG, "Loaded ${allBeacons.size} total beacons across ${floors.size} floors")
+            
+            // Now initialize localization with ALL floor IDs so it can figure out which floor user is on
+            if (floors.isNotEmpty()) {
+                val allFloorIds = floors.map { it.id }
+                Log.d(TAG, "Initializing localization with all floor IDs: $allFloorIds")
+                initializeLocalizationWithAllFloors(allFloorIds)
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading beacons for trilateration", e)
         }
     }
 
@@ -423,7 +460,12 @@ class MainActivity : AppCompatActivity() {
                 updateMapDisplayWithGeoJSON(poisGeoJSON, beaconsGeoJSON, routeNodesGeoJSON)
                 
                 // Initialize localization for this floor
-                initializeLocalization(floor.id)
+                // Skip if we've already done multi-floor initialization at startup
+                if (!hasInitializedMultiFloorLocalization) {
+                    initializeLocalization(floor.id)
+                } else {
+                    Log.d(TAG, "Skipping per-floor localization - already initialized with all floors")
+                }
                 
                 // Redraw navigation path for the new floor if navigation is active
                 if (currentNavigationPath != null) {
@@ -1932,6 +1974,56 @@ class MainActivity : AppCompatActivity() {
 
             } catch (e: Exception) {
                 Log.e(TAG, "Error initializing localization", e)
+            }
+        }
+    }
+    
+    /**
+     * Initialize localization with ALL floor IDs to automatically determine user's floor
+     * This is called at startup after beacons from all floors are loaded
+     */
+    private fun initializeLocalizationWithAllFloors(floorIds: List<Int>) {
+        // Check if we have required Bluetooth permissions
+        if (!hasBluetoothPermissions()) {
+            Log.w(TAG, "Bluetooth permissions not granted, cannot start localization")
+            return
+        }
+
+        lifecycleScope.launch {
+            try {
+                Log.d(TAG, "Initializing localization with all floor IDs: $floorIds")
+
+                // Stop any existing localization
+                if (isLocalizationActive) {
+                    localizationController.stop()
+                    isLocalizationActive = false
+                }
+
+                // Use auto-initialization with ALL floor IDs
+                // This will scan beacons and automatically determine which floor the user is on
+                val success = localizationController.autoInitialize(
+                    availableFloorIds = floorIds,
+                    scanDurationMs = 5000 // 5 seconds
+                )
+
+                if (success) {
+                    // Start continuous localization
+                    localizationController.start()
+                    isLocalizationActive = true
+                    hasInitializedMultiFloorLocalization = true
+
+                    // Observe position updates
+                    observeLocalizationUpdates()
+
+                    Log.d(TAG, "Multi-floor localization started successfully")
+                    Toast.makeText(this@MainActivity, "🔍 Detecting your floor...", Toast.LENGTH_SHORT).show()
+                } else {
+                    Log.w(TAG, "Multi-floor auto-initialization failed")
+                    Toast.makeText(this@MainActivity, "Could not detect floor position", Toast.LENGTH_SHORT).show()
+                }
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Error initializing multi-floor localization", e)
             }
         }
     }
