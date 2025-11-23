@@ -3,6 +3,7 @@ package com.KFUPM.ai_indoor_nav_mobile
 import android.Manifest
 import android.app.Activity
 import android.app.Dialog
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
