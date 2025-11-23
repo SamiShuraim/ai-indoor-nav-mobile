@@ -180,15 +180,17 @@ class AutoInitializer(
                 -100.0
             }
             
-            floorScores[floorId] = FloorScore(
+            val floorScore = FloorScore(
                 matchCount = matchCount,
                 mismatchCount = mismatchCount,
                 avgRssi = avgRssi,
                 totalBeacons = beacons.size
             )
             
-            val score = score.matchCount * 10.0 + (score.avgRssi + 100) / 10.0 - score.mismatchCount * 2.0
-            Log.d(TAG, "Floor $floorId: $matchCount matches, $mismatchCount mismatches, avg RSSI: ${String.format("%.1f", avgRssi)}, SCORE: ${String.format("%.2f", score)}")
+            floorScores[floorId] = floorScore
+            
+            val computedScore = floorScore.matchCount * 10.0 + (floorScore.avgRssi + 100) / 10.0 - floorScore.mismatchCount * 2.0
+            Log.d(TAG, "Floor $floorId: $matchCount matches, $mismatchCount mismatches, avg RSSI: ${String.format("%.1f", avgRssi)}, SCORE: ${String.format("%.2f", computedScore)}")
         }
         
         // Select floor with best score
