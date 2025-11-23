@@ -2701,57 +2701,79 @@ class MainActivity : AppCompatActivity() {
      * Show beacon mapping status dialog
      */
     private fun showBeaconMappingStatus() {
-        val status = localizationController.getBackgroundMapperStatus()
-        
-        val message = if (status != null) {
-            val progressPercent = (status.progress * 100).toInt()
-            buildString {
-                append("📡 Beacon Mapping Status\n\n")
-                append("Progress: $progressPercent%\n")
-                append("Mapped: ${status.mappedBeacons}/${status.totalBeacons}\n")
-                append("Status: ${if (status.isComplete) "✅ Complete" else "🔄 In Progress"}\n\n")
+        lifecycleScope.launch {
+            try {
+                // Get cached beacon mappings only (no active scanning)
+                val cache = com.KFUPM.ai_indoor_nav_mobile.localization.BeaconMappingCache(this@MainActivity)
+                val cachedMappings = cache.getMappings()
                 
-                if (status.discoveredInSession.isNotEmpty()) {
-                    append("Discovered this session:\n")
-                    status.discoveredInSession.forEach {
-                        append("  • $it\n")
+                // Get all beacon names from all floors
+                val allBeaconNames = mutableSetOf<String>()
+                for (floor in floors) {
+                    val beacons = apiService.getBeaconsByFloor(floor.id)
+                    beacons?.forEach { beacon ->
+                        if (!beacon.uuid.isNullOrBlank() || beacon.name != null) {
+                            beacon.name?.let { allBeaconNames.add(it) }
+                        }
                     }
-                    append("\n")
                 }
                 
-                if (status.unmappedBeacons.isNotEmpty()) {
-                    append("Still unmapped (${status.unmappedBeacons.size}):\n")
-                    status.unmappedBeacons.take(10).forEach {
-                        append("  • $it\n")
+                val mappedBeacons = allBeaconNames.filter { cachedMappings.containsKey(it) }
+                val unmappedBeacons = allBeaconNames.filter { !cachedMappings.containsKey(it) }
+                
+                val message = buildString {
+                    append("📡 Cached Beacon Mappings\n\n")
+                    append("Total Beacons: ${allBeaconNames.size}\n")
+                    append("Mapped: ${mappedBeacons.size}\n")
+                    append("Unmapped: ${unmappedBeacons.size}\n\n")
+                    
+                    if (mappedBeacons.isNotEmpty()) {
+                        append("✅ Mapped (${mappedBeacons.size}):\n")
+                        mappedBeacons.take(10).forEach { name ->
+                            val mac = cachedMappings[name]
+                            append("  • $name → $mac\n")
+                        }
+                        if (mappedBeacons.size > 10) {
+                            append("  ... and ${mappedBeacons.size - 10} more\n")
+                        }
+                        append("\n")
                     }
-                    if (status.unmappedBeacons.size > 10) {
-                        append("  ... and ${status.unmappedBeacons.size - 10} more\n")
+                    
+                    if (unmappedBeacons.isNotEmpty()) {
+                        append("⚠️ Unmapped (${unmappedBeacons.size}):\n")
+                        unmappedBeacons.take(10).forEach { beacon ->
+                            append("  • $beacon\n")
+                        }
+                        if (unmappedBeacons.size > 10) {
+                            append("  ... and ${unmappedBeacons.size - 10} more\n")
+                        }
+                        append("\n")
                     }
-                } else {
-                    append("🎉 All beacons mapped!")
+                    
+                    if (unmappedBeacons.isNotEmpty()) {
+                        append("ℹ️ Background scanning is disabled.\n")
+                        append("Unmapped beacons won't affect localization.")
+                    }
+                }
+                
+                withContext(Dispatchers.Main) {
+                    android.app.AlertDialog.Builder(this@MainActivity)
+                        .setTitle("Beacon Cache Status")
+                        .setMessage(message)
+                        .setPositiveButton("Close", null)
+                        .show()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error showing beacon status", e)
+                withContext(Dispatchers.Main) {
+                    android.app.AlertDialog.Builder(this@MainActivity)
+                        .setTitle("Beacon Cache Status")
+                        .setMessage("📡 Cached Beacon Mappings\n\nCould not load beacon status.")
+                        .setPositiveButton("Close", null)
+                        .show()
                 }
             }
-        } else {
-            "Background mapping not active.\nBeacons are loaded from cache."
         }
-        
-        val builder = android.app.AlertDialog.Builder(this)
-            .setTitle("Beacon Mapping Status")
-            .setMessage(message)
-            .setPositiveButton("Close", null)
-        
-        // Add "Force Scan" button if mapping is active and not complete
-        if (status != null && !status.isComplete) {
-            builder.setNeutralButton("🔍 Force Scan Now") { _, _ ->
-                lifecycleScope.launch {
-                    Toast.makeText(this@MainActivity, "Scanning for 2 seconds...", Toast.LENGTH_SHORT).show()
-                    localizationController.forceScanForBeacons()
-                    Toast.makeText(this@MainActivity, "Scan complete! Check status again.", Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
-        
-        builder.show()
     }
     
     override fun onStart() { super.onStart(); mapView.onStart() }
