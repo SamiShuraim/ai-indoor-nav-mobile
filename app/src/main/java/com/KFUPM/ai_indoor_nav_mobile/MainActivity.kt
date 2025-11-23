@@ -2051,16 +2051,29 @@ class MainActivity : AppCompatActivity() {
                 if (position != null) {
                     val (x, y) = position
                     Log.d(TAG, "Localization: node=$nodeId, pos=($x, $y), confidence=${String.format("%.2f", confidence)}")
-
-                    // Update blue dot on map
-                    updateLocalizationMarker(x, y, confidence)
+                    
+                    // Determine which floor the user is actually on
+                    val detectedFloorId = if (nodeId != null && confidence > 0.6) {
+                        nodeToFloorMap[nodeId]
+                    } else {
+                        null
+                    }
+                    
+                    // Only show blue dot if user is on the currently displayed floor
+                    val currentDisplayedFloorId = currentFloor?.id
+                    if (detectedFloorId != null && detectedFloorId == currentDisplayedFloorId) {
+                        // Update blue dot on map - user is on the correct floor
+                        updateLocalizationMarker(x, y, confidence)
+                    } else {
+                        // Hide blue dot - user is on a different floor
+                        clearLocalizationMarker()
+                    }
                     
                     // Update navigation path progress
                     updateNavigationProgress(nodeId)
                     
                     // Update floor selector to show current physical floor indicator
                     if (nodeId != null && confidence > 0.6) {
-                        val detectedFloorId = nodeToFloorMap[nodeId]
                         if (detectedFloorId != null) {
                             withContext(Dispatchers.Main) {
                                 floorSelectorAdapter.setUserCurrentFloor(detectedFloorId)
