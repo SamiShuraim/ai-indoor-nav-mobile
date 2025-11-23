@@ -424,9 +424,6 @@ class MainActivity : AppCompatActivity() {
         currentFloor = floor
         floorSelectorAdapter.setSelectedFloor(floor.id)
         Log.d(TAG, "currentFloor set to: id=${currentFloor?.id}, number=${currentFloor?.floorNumber}, name=${currentFloor?.name}")
-        
-        // Reset assignment flag when changing floors
-        hasRequestedInitialAssignment = false
 
         // Redraw path if navigation is active (after floor data loads)
         lifecycleScope.launch {
