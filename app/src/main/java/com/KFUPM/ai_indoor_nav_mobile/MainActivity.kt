@@ -1753,6 +1753,7 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * Add floor transition indicators next to stairs/elevators
+     * Shows indicators at the starting point of floor transitions
      */
     private fun addFloorTransitionIndicators(style: Style, features: List<Feature>, currentFloorId: Int) {
         lifecycleScope.launch {
@@ -1760,58 +1761,55 @@ class MainActivity : AppCompatActivity() {
                 Log.d(TAG, "🔍 Looking for floor transitions on floor $currentFloorId...")
                 val transitionFeatures = mutableListOf<Feature>()
                 
-                // Get all path nodes
+                // Get all path edges to find floor transitions
+                val pathEdges = features.filter { it.getBooleanProperty("is_path_edge") == true }
                 val pathNodes = features.filter { it.getBooleanProperty("is_path_node") == true }
-                Log.d(TAG, "Found ${pathNodes.size} path nodes to check")
                 
-                // Find transition nodes on current floor (marked with is_level_transition)
-                pathNodes.forEach { feature ->
-                    val nodeIdStr = feature.getStringProperty("id")
-                    val nodeId = nodeIdStr?.toIntOrNull()
-                    val isLevelTransition = feature.getBooleanProperty("is_level_transition") ?: false
+                Log.d(TAG, "Found ${pathEdges.size} path edges and ${pathNodes.size} path nodes to check")
+                
+                // Find edges that transition between floors
+                pathEdges.forEach { edge ->
+                    val fromNodeId = edge.getNumberProperty("from_node_id")?.toInt()
+                    val toNodeId = edge.getNumberProperty("to_node_id")?.toInt()
+                    val isLevelTransition = edge.getBooleanProperty("is_level_transition") ?: false
                     
-                    if (nodeId != null && isLevelTransition) {
-                        val nodeFloorId = nodeToFloorMap[nodeId.toString()]
+                    if (fromNodeId != null && toNodeId != null) {
+                        val fromFloorId = nodeToFloorMap[fromNodeId.toString()]
+                        val toFloorId = nodeToFloorMap[toNodeId.toString()]
                         
-                        Log.d(TAG, "Found level transition node: $nodeId (floor: $nodeFloorId, current: $currentFloorId)")
-                        
-                        // Only process nodes on current floor
-                        if (nodeFloorId == currentFloorId) {
-                            // Get transition details from the feature
-                            val fromLevel = feature.getNumberProperty("transition_from_level")?.toInt()
-                            val toLevel = feature.getNumberProperty("transition_to_level")?.toInt()
+                        // Check if this edge transitions between floors
+                        if (fromFloorId != toFloorId && fromFloorId != null && toFloorId != null) {
+                            Log.d(TAG, "Found floor transition edge: $fromNodeId (floor $fromFloorId) -> $toNodeId (floor $toFloorId)")
                             
-                            Log.d(TAG, "✅ Found transition node on current floor: $nodeId (from level $fromLevel to $toLevel)")
-                            
-                            // This is a transition node - find connected nodes on different floors
-                            val connectedFloors = findConnectedFloors(nodeId, features)
-                            
-                            if (connectedFloors.isNotEmpty()) {
-                                Log.d(TAG, "  Connected to ${connectedFloors.size} other floors")
+                            // Show indicator on the FROM floor (where user needs to take action)
+                            if (fromFloorId == currentFloorId) {
+                                // Find the FROM node to get its position
+                                val fromNode = pathNodes.find { 
+                                    val nodeIdStr = it.getStringProperty("id")
+                                    nodeIdStr?.toIntOrNull() == fromNodeId
+                                }
                                 
-                                // Get the geometry from the feature
-                                val geometry = feature.geometry()
-                                if (geometry is Point) {
-                                    connectedFloors.forEach { (targetFloorId, direction) ->
-                                        // Get floor number
-                                        val targetFloor = floors.find { it.id == targetFloorId }
-                                        if (targetFloor != null) {
-                                            // Create indicator feature
+                                if (fromNode != null) {
+                                    val geometry = fromNode.geometry()
+                                    if (geometry is Point) {
+                                        // Determine direction (up or down)
+                                        val fromFloor = floors.find { it.id == fromFloorId }
+                                        val toFloor = floors.find { it.id == toFloorId }
+                                        
+                                        if (fromFloor != null && toFloor != null) {
+                                            val direction = if (toFloor.floorNumber > fromFloor.floorNumber) "↑" else "↓"
+                                            val text = "$direction F${toFloor.floorNumber}"
+                                            
                                             val indicator = Feature.fromGeometry(geometry)
-                                            val text = "$direction F${targetFloor.floorNumber}"
                                             indicator.addStringProperty("text", text)
                                             indicator.addStringProperty("direction", direction)
-                                            indicator.addNumberProperty("targetFloor", targetFloor.floorNumber)
+                                            indicator.addNumberProperty("targetFloor", toFloor.floorNumber)
                                             transitionFeatures.add(indicator)
                                             
-                                            Log.d(TAG, "  📍 Creating indicator: '$text' at (${geometry.coordinates()[0]}, ${geometry.coordinates()[1]})")
+                                            Log.d(TAG, "  ✅ Creating indicator '$text' at node $fromNodeId on ${fromFloor.name}")
                                         }
                                     }
-                                } else {
-                                    Log.w(TAG, "  ⚠️ Node geometry is not a Point: ${geometry?.type()}")
                                 }
-                            } else {
-                                Log.d(TAG, "  ⚠️ No connected floors found")
                             }
                         }
                     }
@@ -1831,44 +1829,6 @@ class MainActivity : AppCompatActivity() {
                 Log.e(TAG, "❌ Error adding floor transition indicators", e)
             }
         }
-    }
-
-    /**
-     * Find floors connected to this node via edges
-     */
-    private fun findConnectedFloors(nodeId: Int, features: List<Feature>): List<Pair<Int, String>> {
-        val connectedFloors = mutableListOf<Pair<Int, String>>()
-        val currentFloorId = nodeToFloorMap[nodeId.toString()] ?: return connectedFloors
-        
-        // Find all edges connected to this node
-        features.filter { it.getBooleanProperty("is_path_edge") == true }.forEach { edge ->
-            val fromNodeId = edge.getNumberProperty("from_node_id")?.toInt()
-            val toNodeId = edge.getNumberProperty("to_node_id")?.toInt()
-            
-            if (fromNodeId == nodeId || toNodeId == nodeId) {
-                val connectedNodeId = if (fromNodeId == nodeId) toNodeId else fromNodeId
-                if (connectedNodeId != null) {
-                    val connectedFloorId = nodeToFloorMap[connectedNodeId.toString()]
-                    
-                    if (connectedFloorId != null && connectedFloorId != currentFloorId) {
-                        // Determine direction
-                        val currentFloor = floors.find { it.id == currentFloorId }
-                        val connectedFloor = floors.find { it.id == connectedFloorId }
-                        
-                        if (currentFloor != null && connectedFloor != null) {
-                            val direction = if (connectedFloor.floorNumber > currentFloor.floorNumber) "↑" else "↓"
-                            
-                            // Avoid duplicates
-                            if (!connectedFloors.any { it.first == connectedFloorId }) {
-                                connectedFloors.add(Pair(connectedFloorId, direction))
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        return connectedFloors
     }
 
     /**
