@@ -182,7 +182,7 @@ class LocalizationController(private val context: Context) {
                 
                 graphModel = GraphModel(graph)
                 observationModel = ObservationModel(
-                    beacons = beacons,
+                    beacons = allBeacons,
                     rankWeight = config.rankWeight,
                     pairwiseWeight = config.pairwiseWeight,
                     distanceRatioSlope = config.distanceRatioSlope
