@@ -1888,16 +1888,16 @@ class MainActivity : AppCompatActivity() {
             val source = GeoJsonSource(transitionIndicatorsSourceId, featureCollection)
             style.addSource(source)
             
-            // Add background circle layer behind text (offset to match text position)
+            // Add background circle layer behind text
             val backgroundLayerId = "${transitionIndicatorsLayerId}_bg"
             val backgroundLayer = CircleLayer(backgroundLayerId, transitionIndicatorsSourceId)
                 .withProperties(
-                    circleRadius(20f),
+                    circleRadius(18f),
                     circleColor("#FFFFFF"), // White background
-                    circleOpacity(0.9f),
+                    circleOpacity(0.95f),
                     circleStrokeColor("#000000"),
                     circleStrokeWidth(2f),
-                    circleTranslate(arrayOf(0f, -20f)) // Offset to match text position
+                    circleTranslate(arrayOf(0f, -35f)) // Offset to match text position (approximately 2.5em in pixels)
                 )
             style.addLayer(backgroundLayer)
             
@@ -1908,7 +1908,7 @@ class MainActivity : AppCompatActivity() {
                     PropertyFactory.textSize(14f),
                     PropertyFactory.textColor("#000000"), // Black text on white background
                     PropertyFactory.textOffset(arrayOf(0f, -2.5f)), // Offset above node
-                    PropertyFactory.textAnchor("bottom"),
+                    PropertyFactory.textAnchor("center"), // Center anchor for better alignment
                     PropertyFactory.textAllowOverlap(true),
                     PropertyFactory.textIgnorePlacement(true),
                     PropertyFactory.iconAllowOverlap(true),
