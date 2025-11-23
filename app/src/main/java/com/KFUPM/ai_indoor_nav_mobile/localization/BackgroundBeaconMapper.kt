@@ -38,8 +38,8 @@ class BackgroundBeaconMapper(private val context: Context) {
     // Currently discovered beacons (in this session)
     private val discoveredInSession = ConcurrentHashMap<String, String>()
     
-    // Scan interval (once per second)
-    private val scanIntervalMs = 1000L
+    // Scan interval (once every 2 seconds)
+    private val scanIntervalMs = 2000L
     
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
@@ -171,7 +171,7 @@ class BackgroundBeaconMapper(private val context: Context) {
                 }
             }
         }
-        Log.d(TAG, "Periodic background scanning started (once per second)")
+        Log.d(TAG, "Periodic background scanning started (once every 2 seconds)")
     }
     
     /**
