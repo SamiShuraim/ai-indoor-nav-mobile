@@ -416,6 +416,10 @@ class MainActivity : AppCompatActivity() {
      */
     private fun onFloorSelected(floor: Floor) {
         Log.d(TAG, "Floor selected: ${floor.name} (id: ${floor.id})")
+        
+        // User manually selected a floor - disable auto-switching
+        allowAutoFloorSwitch = false
+        
         selectFloor(floor)
     }
 
