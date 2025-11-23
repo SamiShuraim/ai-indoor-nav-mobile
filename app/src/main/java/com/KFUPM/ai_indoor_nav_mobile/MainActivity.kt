@@ -86,6 +86,7 @@ class MainActivity : AppCompatActivity() {
     private var hasNavigatedToAssignedLevel = false // Track if we've navigated to the assigned level
     private var hasInitializedMultiFloorLocalization = false // Track if we've done initial multi-floor localization
     private var lastDetectedFloorId: Int? = null // Track user's last physically detected floor
+    private var shouldZoomToInitialPosition = false // Track if we should zoom to position on first update
     
     // Mapping of node ID to floor ID for automatic floor switching
     private val nodeToFloorMap = mutableMapOf<String, Int>()
@@ -1956,6 +1957,7 @@ class MainActivity : AppCompatActivity() {
                     // Start continuous localization
                     localizationController.start()
                     isLocalizationActive = true
+                    shouldZoomToInitialPosition = true // Enable zoom on first position update
 
                     // Observe position updates (assignment will be requested once position is found)
                     observeLocalizationUpdates()
@@ -2015,16 +2017,32 @@ class MainActivity : AppCompatActivity() {
                 )
 
                 if (success) {
+                    // Get the detected floor ID
+                    val detectedFloorId = localizationController.getCurrentFloorId()
+                    Log.d(TAG, "Auto-initialization detected floor: $detectedFloorId")
+                    
                     // Start continuous localization
                     localizationController.start()
                     isLocalizationActive = true
                     hasInitializedMultiFloorLocalization = true
+                    shouldZoomToInitialPosition = true // Enable zoom on first position update
 
-                    // Observe position updates
+                    // Observe position updates (with flag to zoom on first position)
                     observeLocalizationUpdates()
 
+                    // Select the detected floor in UI
+                    if (detectedFloorId != null) {
+                        val detectedFloor = floors.find { it.id == detectedFloorId }
+                        if (detectedFloor != null) {
+                            withContext(Dispatchers.Main) {
+                                selectFloor(detectedFloor)
+                                Log.d(TAG, "Auto-selected floor: ${detectedFloor.name}")
+                            }
+                        }
+                    }
+
                     Log.d(TAG, "Multi-floor localization started successfully")
-                    Toast.makeText(this@MainActivity, "🔍 Detecting your floor...", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, "📍 Located on floor ${detectedFloorId ?: "unknown"}", Toast.LENGTH_SHORT).show()
                 } else {
                     Log.w(TAG, "Multi-floor auto-initialization failed")
                     Toast.makeText(this@MainActivity, "Could not detect floor position", Toast.LENGTH_SHORT).show()
@@ -2067,6 +2085,25 @@ class MainActivity : AppCompatActivity() {
                     } else {
                         // Hide blue dot - user is on a different floor
                         clearLocalizationMarker()
+                    }
+                    
+                    // Zoom to initial position if requested
+                    if (shouldZoomToInitialPosition && confidence > 0.5) {
+                        shouldZoomToInitialPosition = false // Only zoom once
+                        withContext(Dispatchers.Main) {
+                            mapLibreMap?.let { map ->
+                                val latLng = org.maplibre.android.geometry.LatLng(y, x)
+                                val cameraPosition = org.maplibre.android.camera.CameraPosition.Builder()
+                                    .target(latLng)
+                                    .zoom(19.0) // Close zoom level to see the user's position clearly
+                                    .build()
+                                map.animateCamera(
+                                    org.maplibre.android.camera.CameraUpdateFactory.newCameraPosition(cameraPosition),
+                                    1000 // 1 second animation
+                                )
+                                Log.d(TAG, "Zoomed to initial position: ($x, $y)")
+                            }
+                        }
                     }
                     
                     // Update navigation path progress
