@@ -75,7 +75,6 @@ class MainActivity : AppCompatActivity() {
 
     private val apiService = ApiService()
     private lateinit var localizationController: LocalizationController
-    private lateinit var cacheManager: CacheManager
     private var isLocalizationActive = false
 
     // Visitor ID for QR code
@@ -90,7 +89,7 @@ class MainActivity : AppCompatActivity() {
     
     // Mapping of node ID to floor ID for automatic floor switching
     private val nodeToFloorMap = mutableMapOf<String, Int>()
-
+    
     // Data
     private var currentBuilding: Building? = null
     private var floors: List<Floor> = emptyList()
@@ -134,8 +133,6 @@ class MainActivity : AppCompatActivity() {
     private var targetNavigationLevel: Int? = null
     private val visitedPathNodeIds = mutableSetOf<Int>()
     
-    // Cache for node types (to avoid repeated API calls)
-    private val nodeTypeCache = mutableMapOf<Int, String?>()
     companion object {
         private const val TAG = "MainActivity"
     }
@@ -186,9 +183,8 @@ class MainActivity : AppCompatActivity() {
         assignmentInfoText = findViewById(R.id.assignmentInfoText)
         btnRetryApi = findViewById(R.id.btnRetryApi)
 
-        // Initialize localization controller and cache manager
+        // Initialize localization controller
         localizationController = LocalizationController(this)
-        cacheManager = CacheManager(this)
 
         setupFloorSelector()
         mapView.onCreate(savedInstanceState)
@@ -1892,16 +1888,16 @@ class MainActivity : AppCompatActivity() {
             val source = GeoJsonSource(transitionIndicatorsSourceId, featureCollection)
             style.addSource(source)
             
-            // Add background circle layer behind text (offset to match text position)
+            // Add background circle layer behind text
             val backgroundLayerId = "${transitionIndicatorsLayerId}_bg"
             val backgroundLayer = CircleLayer(backgroundLayerId, transitionIndicatorsSourceId)
                 .withProperties(
-                    circleRadius(20f),
+                    circleRadius(18f),
                     circleColor("#FFFFFF"), // White background
-                    circleOpacity(0.9f),
+                    circleOpacity(0.95f),
                     circleStrokeColor("#000000"),
                     circleStrokeWidth(2f),
-                    circleTranslate(arrayOf(0f, -20f)) // Offset to match text position
+                    circleTranslate(arrayOf(0f, -35f)) // Offset to match text position (approximately 2.5em in pixels)
                 )
             style.addLayer(backgroundLayer)
             
@@ -1912,7 +1908,7 @@ class MainActivity : AppCompatActivity() {
                     PropertyFactory.textSize(14f),
                     PropertyFactory.textColor("#000000"), // Black text on white background
                     PropertyFactory.textOffset(arrayOf(0f, -2.5f)), // Offset above node
-                    PropertyFactory.textAnchor("bottom"),
+                    PropertyFactory.textAnchor("center"), // Center anchor for better alignment
                     PropertyFactory.textAllowOverlap(true),
                     PropertyFactory.textIgnorePlacement(true),
                     PropertyFactory.iconAllowOverlap(true),
@@ -2055,16 +2051,29 @@ class MainActivity : AppCompatActivity() {
                 if (position != null) {
                     val (x, y) = position
                     Log.d(TAG, "Localization: node=$nodeId, pos=($x, $y), confidence=${String.format("%.2f", confidence)}")
-
-                    // Update blue dot on map
-                    updateLocalizationMarker(x, y, confidence)
+                    
+                    // Determine which floor the user is actually on
+                    val detectedFloorId = if (nodeId != null && confidence > 0.6) {
+                        nodeToFloorMap[nodeId]
+                    } else {
+                        null
+                    }
+                    
+                    // Only show blue dot if user is on the currently displayed floor
+                    val currentDisplayedFloorId = currentFloor?.id
+                    if (detectedFloorId != null && detectedFloorId == currentDisplayedFloorId) {
+                        // Update blue dot on map - user is on the correct floor
+                        updateLocalizationMarker(x, y, confidence)
+                    } else {
+                        // Hide blue dot - user is on a different floor
+                        clearLocalizationMarker()
+                    }
                     
                     // Update navigation path progress
                     updateNavigationProgress(nodeId)
                     
                     // Update floor selector to show current physical floor indicator
                     if (nodeId != null && confidence > 0.6) {
-                        val detectedFloorId = nodeToFloorMap[nodeId]
                         if (detectedFloorId != null) {
                             withContext(Dispatchers.Main) {
                                 floorSelectorAdapter.setUserCurrentFloor(detectedFloorId)

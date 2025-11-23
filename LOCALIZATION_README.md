@@ -72,7 +72,6 @@ com.KFUPM.ai_indoor_nav_mobile.localization/
 
 #### 7. **ConfigProvider**
 - Fetches beacons, graph, and config from API
-- Caches data locally for offline operation
 - Checks for config version updates
 
 #### 8. **LocalizationController** (Main API)
@@ -256,17 +255,16 @@ To reduce battery usage:
 
 ## Offline Operation
 
-After initial sync, the system works **completely offline**:
+After initial data fetch, all computation happens on-device:
 
-1. Beacons, graph, and config are cached locally
-2. All computation happens on-device
-3. No network requests during operation
-4. Periodically check for updates when online
+1. All computation happens on-device
+2. No network requests during localization operation
+3. Requires network connectivity for initial beacon and graph data
 
 ```kotlin
-// Force offline mode (uses cache)
+// Initialize localization for a floor
 val success = localizationController.initialize(floorId = 1)
-// Will use cached data if network unavailable
+// Fetches beacon and graph data from API
 ```
 
 ---

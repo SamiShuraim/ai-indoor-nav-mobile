@@ -11,25 +11,16 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.io.File
 
 /**
  * Configuration provider for localization data
- * Fetches beacons, graph, and config from API with local caching
+ * Fetches beacons, graph, and config from API
  */
 class ConfigProvider(private val context: Context) {
     private val TAG = "ConfigProvider"
     
     private val client = OkHttpClient()
     private val gson = Gson()
-    
-    private val cacheDir = File(context.cacheDir, "localization")
-    
-    init {
-        if (!cacheDir.exists()) {
-            cacheDir.mkdirs()
-        }
-    }
     
     /**
      * Fetch beacons for a floor and optionally map names to MAC addresses
@@ -87,22 +78,17 @@ class ConfigProvider(private val context: Context) {
                                 }
                             }
                             
-                            // Cache the result
-                            cacheBeacons(floorId, locBeacons)
-                            
                             Log.d(TAG, "Fetched ${locBeacons.size} beacons for floor $floorId with MAC addresses: ${locBeacons.map { it.id }}")
                             locBeacons
                         } else null
                     } else {
                         Log.e(TAG, "Failed to fetch beacons: ${response.code}")
-                        // Try loading from cache
-                        loadCachedBeacons(floorId)
+                        null
                     }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error fetching beacons", e)
-                // Try loading from cache
-                loadCachedBeacons(floorId)
+                null
             }
         }
     }
@@ -159,22 +145,17 @@ class ConfigProvider(private val context: Context) {
                             
                             val graph = IndoorGraph(nodes = nodes, edges = edges)
                             
-                            // Cache the result
-                            cacheGraph(floorId, graph)
-                            
                             Log.d(TAG, "Built graph from ${routeNodes.size} route nodes: ${nodes.size} nodes and ${edges.size} edges")
                             graph
                         } else null
                     } else {
                         Log.e(TAG, "Failed to fetch route nodes: ${response.code}")
-                        // Try loading from cache
-                        loadCachedGraph(floorId)
+                        null
                     }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error fetching graph from route nodes", e)
-                // Try loading from cache
-                loadCachedGraph(floorId)
+                null
             }
         }
     }
@@ -197,9 +178,6 @@ class ConfigProvider(private val context: Context) {
                             val configResponse = gson.fromJson(jsonString, ConfigResponse::class.java)
                             val config = configResponse.config ?: LocalizationConfig(version = configResponse.version)
                             
-                            // Cache the result
-                            cacheConfig(config)
-                            
                             Log.d(TAG, "Fetched config version: ${config.version}")
                             config
                         } else null
@@ -209,14 +187,14 @@ class ConfigProvider(private val context: Context) {
                         } else {
                             Log.w(TAG, "Failed to fetch config: ${response.code}")
                         }
-                        // Try loading from cache or use defaults
-                        loadCachedConfig() ?: LocalizationConfig(version = "default")
+                        // Use defaults
+                        LocalizationConfig(version = "default")
                     }
                 }
             } catch (e: Exception) {
                 Log.d(TAG, "Config endpoint not available, using default config")
-                // Try loading from cache or use defaults
-                loadCachedConfig() ?: LocalizationConfig(version = "default")
+                // Use defaults
+                LocalizationConfig(version = "default")
             }
         }
     }
@@ -239,87 +217,6 @@ class ConfigProvider(private val context: Context) {
                 Log.e(TAG, "Error checking config version", e)
                 null
             }
-        }
-    }
-    
-    // Caching methods
-    
-    private fun cacheBeacons(floorId: Int, beacons: List<LocalizationBeacon>) {
-        try {
-            val file = File(cacheDir, "beacons_$floorId.json")
-            file.writeText(gson.toJson(beacons))
-        } catch (e: Exception) {
-            Log.e(TAG, "Error caching beacons", e)
-        }
-    }
-    
-    private fun loadCachedBeacons(floorId: Int): List<LocalizationBeacon>? {
-        return try {
-            val file = File(cacheDir, "beacons_$floorId.json")
-            if (file.exists()) {
-                val jsonString = file.readText()
-                val type = object : TypeToken<List<LocalizationBeacon>>() {}.type
-                gson.fromJson(jsonString, type)
-            } else null
-        } catch (e: Exception) {
-            Log.e(TAG, "Error loading cached beacons", e)
-            null
-        }
-    }
-    
-    private fun cacheGraph(floorId: Int, graph: IndoorGraph) {
-        try {
-            val file = File(cacheDir, "graph_$floorId.json")
-            file.writeText(gson.toJson(graph))
-        } catch (e: Exception) {
-            Log.e(TAG, "Error caching graph", e)
-        }
-    }
-    
-    private fun loadCachedGraph(floorId: Int): IndoorGraph? {
-        return try {
-            val file = File(cacheDir, "graph_$floorId.json")
-            if (file.exists()) {
-                val jsonString = file.readText()
-                gson.fromJson(jsonString, IndoorGraph::class.java)
-            } else null
-        } catch (e: Exception) {
-            Log.e(TAG, "Error loading cached graph", e)
-            null
-        }
-    }
-    
-    private fun cacheConfig(config: LocalizationConfig) {
-        try {
-            val file = File(cacheDir, "config.json")
-            file.writeText(gson.toJson(config))
-        } catch (e: Exception) {
-            Log.e(TAG, "Error caching config", e)
-        }
-    }
-    
-    private fun loadCachedConfig(): LocalizationConfig? {
-        return try {
-            val file = File(cacheDir, "config.json")
-            if (file.exists()) {
-                val jsonString = file.readText()
-                gson.fromJson(jsonString, LocalizationConfig::class.java)
-            } else null
-        } catch (e: Exception) {
-            Log.e(TAG, "Error loading cached config", e)
-            null
-        }
-    }
-    
-    /**
-     * Clear all cached data
-     */
-    fun clearCache() {
-        try {
-            cacheDir.listFiles()?.forEach { it.delete() }
-            Log.d(TAG, "Cache cleared")
-        } catch (e: Exception) {
-            Log.e(TAG, "Error clearing cache", e)
         }
     }
     

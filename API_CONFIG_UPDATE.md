@@ -164,23 +164,10 @@ Production API (periodic):
 
 ---
 
-## Caching & Offline Support
-
-The localization system caches data from the production API:
-
-**Cached Data:**
-- Beacon positions
-- Navigation graph
-- Localization config
-
-**Cache Location:**
-- `context.cacheDir/localization/`
-- `beacons_{floorId}.json`
-- `graph_{floorId}.json`
-- `config.json`
+## Offline Support
 
 **Offline Behavior:**
-After initial data fetch, the app can work **completely offline**. All localization happens on-device.
+All localization computation happens on-device after initial data fetch. The app requires network connectivity to fetch initial beacon positions and navigation graph data.
 
 ---
 
