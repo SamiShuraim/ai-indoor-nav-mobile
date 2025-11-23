@@ -53,12 +53,12 @@ class LocalizationController(private val context: Context) {
      * 3. Estimates initial position
      * 4. Initializes localization system
      * 
-     * @param availableFloorIds List of floor IDs to check (get from API)
+     * @param floorIds List of floor IDs to check (get from API)
      * @param scanDurationMs How long to scan beacons (default 5s)
      * @return true if successful, false otherwise
      */
     suspend fun autoInitialize(
-        availableFloorIds: List<Int>,
+        floorIds: List<Int>,
         scanDurationMs: Long = 5000
     ): Boolean {
         return withContext(Dispatchers.IO) {
@@ -68,7 +68,7 @@ class LocalizationController(private val context: Context) {
                 // Create beacon name mapper for automatic MAC address detection
                 beaconNameMapper = BeaconNameMapper(context)
                 val autoInit = AutoInitializer(context, configProvider, beaconNameMapper)
-                val result = autoInit.autoInitialize(availableFloorIds, scanDurationMs)
+                val result = autoInit.autoInitialize(floorIds, scanDurationMs)
                 
                 if (result == null) {
                     Log.e(TAG, "Auto-initialization failed")
@@ -78,7 +78,7 @@ class LocalizationController(private val context: Context) {
                 // Update config
                 config = result.config
                 currentFloorId = result.floorId
-                this.availableFloorIds = availableFloorIds
+                availableFloorIds = floorIds
                 
                 // Initialize components
                 graphModel = GraphModel(result.graph)
