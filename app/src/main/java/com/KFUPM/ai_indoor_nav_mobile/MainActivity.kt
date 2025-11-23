@@ -2701,14 +2701,45 @@ class MainActivity : AppCompatActivity() {
                     return@launch
                 }
                 
-                // Get ALL nearby beacons (not just known ones)
-                val rssiMap = localizationController.getBeaconScanner()?.getAllNearbyBeacons() ?: emptyMap()
+                val scanner = localizationController.getBeaconScanner()
+                
+                // Debug: Check scanner state
+                val isScanning = scanner?.isScanning() ?: false
+                val knownRssi = scanner?.getCurrentRssiMap() ?: emptyMap()
+                val allRssi = scanner?.getAllNearbyBeacons() ?: emptyMap()
+                
+                Log.d(TAG, "🔍 BEACON DEBUG:")
+                Log.d(TAG, "  Scanner active: $isScanning")
+                Log.d(TAG, "  Known beacons (filtered): ${knownRssi.size}")
+                Log.d(TAG, "  All beacons (raw): ${allRssi.size}")
+                
+                // Show KNOWN beacons (the ones used for localization)
+                val rssiMap = knownRssi
                 
                 if (rssiMap.isEmpty()) {
+                    val debugMsg = buildString {
+                        append("No known beacons detected.\n\n")
+                        append("Debug Info:\n")
+                        append("• Scanner running: ${if (isScanning) "✅ Yes" else "❌ No"}\n")
+                        append("• Known beacons: ${knownRssi.size}\n")
+                        append("• All BLE devices: ${allRssi.size}\n\n")
+                        
+                        if (allRssi.isNotEmpty()) {
+                            append("Detected BLE devices:\n")
+                            allRssi.entries.take(5).forEach { (mac, rssi) ->
+                                append("• $mac (${String.format("%.0f", rssi)} dBm)\n")
+                            }
+                            append("\nThese are not in your database!")
+                        } else {
+                            append("No BLE devices detected at all.\n")
+                            append("Check Bluetooth is ON!")
+                        }
+                    }
+                    
                     withContext(Dispatchers.Main) {
                         android.app.AlertDialog.Builder(this@MainActivity)
                             .setTitle("📡 Nearby Beacons")
-                            .setMessage("No beacons detected yet.\n\nMake sure:\n• Bluetooth is enabled\n• You're near beacons\n• Wait a few seconds for scanning")
+                            .setMessage(debugMsg)
                             .setPositiveButton("Close", null)
                             .setNeutralButton("Retry") { _, _ ->
                                 showNearbyBeacons()

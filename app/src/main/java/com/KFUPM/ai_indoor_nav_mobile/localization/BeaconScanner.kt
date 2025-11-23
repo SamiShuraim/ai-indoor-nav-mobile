@@ -244,6 +244,13 @@ class BeaconScanner(
     }
     
     /**
+     * Check if scanner is currently active
+     */
+    fun isScanning(): Boolean {
+        return isScanning
+    }
+    
+    /**
      * Clear all data
      */
     fun clear() {
