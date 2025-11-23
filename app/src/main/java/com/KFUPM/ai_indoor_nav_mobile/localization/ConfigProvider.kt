@@ -240,6 +240,44 @@ class ConfigProvider(private val context: Context) {
     }
     
     /**
+     * Fetch combined graph for ALL floors
+     * This is critical for multi-floor localization to work
+     */
+    suspend fun fetchCombinedGraph(floorIds: List<Int>): IndoorGraph? {
+        return withContext(Dispatchers.IO) {
+            try {
+                Log.d(TAG, "Fetching combined graph for ${floorIds.size} floors: $floorIds")
+                
+                val allNodes = mutableListOf<GraphNode>()
+                val allEdges = mutableListOf<GraphEdge>()
+                
+                // Fetch and combine graphs from all floors
+                for (floorId in floorIds) {
+                    val graph = fetchGraph(floorId)
+                    if (graph != null) {
+                        allNodes.addAll(graph.nodes)
+                        allEdges.addAll(graph.edges)
+                        Log.d(TAG, "Added ${graph.nodes.size} nodes and ${graph.edges.size} edges from floor $floorId")
+                    }
+                }
+                
+                if (allNodes.isEmpty()) {
+                    Log.e(TAG, "No nodes found across all floors!")
+                    return@withContext null
+                }
+                
+                val combinedGraph = IndoorGraph(nodes = allNodes, edges = allEdges)
+                Log.d(TAG, "✅ Combined graph: ${allNodes.size} total nodes, ${allEdges.size} total edges")
+                
+                combinedGraph
+            } catch (e: Exception) {
+                Log.e(TAG, "Error fetching combined graph", e)
+                null
+            }
+        }
+    }
+    
+    /**
      * Fetch localization config
      * Falls back to default config if endpoint doesn't exist
      */

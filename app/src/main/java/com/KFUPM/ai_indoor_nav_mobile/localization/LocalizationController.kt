@@ -151,19 +151,30 @@ class LocalizationController(private val context: Context) {
                 // Create beacon name mapper for automatic MAC address detection
                 beaconNameMapper = BeaconNameMapper(context)
                 
-                // Fetch beacons with name mapping support
-                val beacons = configProvider.fetchBeacons(floorId, beaconNameMapper)
-                if (beacons == null || beacons.isEmpty()) {
-                    Log.e(TAG, "No beacons found for floor $floorId")
+                // Fetch beacons from ALL floors (not just current floor)
+                val allBeacons = mutableListOf<LocalizationBeacon>()
+                for (fId in availableFloorIds) {
+                    val floorBeacons = configProvider.fetchBeacons(fId, beaconNameMapper)
+                    if (floorBeacons != null) {
+                        allBeacons.addAll(floorBeacons)
+                    }
+                }
+                
+                if (allBeacons.isEmpty()) {
+                    Log.e(TAG, "No beacons found across all floors!")
                     return@withContext false
                 }
                 
-                // Fetch graph
-                val graph = configProvider.fetchGraph(floorId)
+                Log.d(TAG, "✅ Loaded ${allBeacons.size} beacons from ALL floors")
+                
+                // Fetch COMBINED graph from ALL floors (THIS IS CRITICAL!)
+                val graph = configProvider.fetchCombinedGraph(availableFloorIds)
                 if (graph == null || graph.nodes.isEmpty()) {
-                    Log.e(TAG, "No graph found for floor $floorId")
+                    Log.e(TAG, "No combined graph found!")
                     return@withContext false
                 }
+                
+                Log.d(TAG, "✅ Loaded combined graph with ${graph.nodes.size} nodes from ALL floors")
                 
                 // Initialize components
                 currentFloorId = floorId
@@ -200,16 +211,16 @@ class LocalizationController(private val context: Context) {
                     emaGamma = config.bleEmaGamma
                 )
                 // Set known beacon IDs for filtering
-                beaconScanner?.setKnownBeaconIds(beacons.map { it.id }.toSet())
+                beaconScanner?.setKnownBeaconIds(allBeacons.map { it.id }.toSet())
                 
                 imuTracker = ImuTracker(context)
                 
                 // Start background mapping for ALL beacons across ALL floors
                 startBackgroundMapping()
                 
-                Log.d(TAG, "Localization initialized successfully")
+                Log.d(TAG, "✅ Localization initialized with ALL FLOORS")
                 Log.d(TAG, "Graph: ${graph.nodes.size} nodes, ${graph.edges.size} edges")
-                Log.d(TAG, "Beacons: ${beacons.size}")
+                Log.d(TAG, "Beacons: ${allBeacons.size}")
                 
                 true
             } catch (e: Exception) {
@@ -534,14 +545,24 @@ class LocalizationController(private val context: Context) {
     private suspend fun refreshBeaconList(floorId: Int) {
         withContext(Dispatchers.IO) {
             try {
-                Log.d(TAG, "Refreshing beacon list with newly mapped beacons...")
+                Log.d(TAG, "Refreshing beacon list for ALL floors...")
                 
-                // Fetch updated beacons
-                val beacons = configProvider.fetchBeacons(floorId, beaconNameMapper)
-                if (beacons == null || beacons.isEmpty()) {
-                    Log.w(TAG, "Failed to refresh beacon list")
+                // Fetch updated beacons from ALL floors (not just current floor)
+                val allBeacons = mutableListOf<LocalizationBeacon>()
+                for (fId in availableFloorIds) {
+                    val floorBeacons = configProvider.fetchBeacons(fId, beaconNameMapper)
+                    if (floorBeacons != null) {
+                        allBeacons.addAll(floorBeacons)
+                    }
+                }
+                
+                val beacons = allBeacons
+                if (beacons.isEmpty()) {
+                    Log.w(TAG, "Failed to refresh beacon list - no beacons found")
                     return@withContext
                 }
+                
+                Log.d(TAG, "✅ Refreshed with ${beacons.size} beacons from ALL floors")
                 
                 // Update observation model with new beacons
                 val wasRunning = isRunning
@@ -576,7 +597,7 @@ class LocalizationController(private val context: Context) {
                     start()
                 }
                 
-                Log.d(TAG, "Beacon list refreshed: ${beacons.size} beacons now available")
+                Log.d(TAG, "Beacon list refreshed: ${beacons.size} beacons now available from ALL floors")
             } catch (e: Exception) {
                 Log.e(TAG, "Error refreshing beacon list", e)
             }

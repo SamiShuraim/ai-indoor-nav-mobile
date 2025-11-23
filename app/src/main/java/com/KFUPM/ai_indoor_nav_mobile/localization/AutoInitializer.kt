@@ -84,20 +84,24 @@ class AutoInitializer(
             
             Log.d(TAG, "Determined floor: $floorId")
             
-            // Step 4: Fetch graph and config for this floor
-            val graph = configProvider.fetchGraph(floorId)
+            // Step 4: Fetch COMBINED graph and config for ALL floors
+            val graph = configProvider.fetchCombinedGraph(availableFloorIds)
             if (graph == null || graph.nodes.isEmpty()) {
-                Log.e(TAG, "No graph data for floor $floorId")
+                Log.e(TAG, "No graph data available")
                 return null
             }
             
             val config = configProvider.fetchConfig() ?: LocalizationConfig(version = "default")
-            val beacons = floorBeacons[floorId]!!
             
-            Log.d(TAG, "Loaded graph with ${graph.nodes.size} nodes, ${graph.edges.size} edges")
+            // Collect ALL beacons from ALL floors (not just detected floor)
+            val allBeacons = floorBeacons.values.flatten()
             
-            // Step 5: Estimate initial node
-            val (initialNode, confidence) = estimateInitialNode(rssiMap, beacons, graph)
+            Log.d(TAG, "✅ Loaded combined graph with ${graph.nodes.size} nodes, ${graph.edges.size} edges")
+            Log.d(TAG, "✅ Loaded ${allBeacons.size} beacons from ALL ${availableFloorIds.size} floors")
+            
+            // Step 5: Estimate initial node (use beacons from detected floor only for initial position)
+            val detectedFloorBeacons = floorBeacons[floorId]!!
+            val (initialNode, confidence) = estimateInitialNode(rssiMap, detectedFloorBeacons, graph)
             
             Log.d(TAG, "Initial position: node=${initialNode}, confidence=${String.format("%.2f", confidence)}")
             
@@ -105,8 +109,8 @@ class AutoInitializer(
                 floorId = floorId,
                 initialNodeId = initialNode,
                 confidence = confidence,
-                beacons = beacons,
-                graph = graph,
+                beacons = allBeacons,  // Return ALL beacons from ALL floors
+                graph = graph,  // Return combined graph from ALL floors
                 config = config
             )
         } catch (e: Exception) {
