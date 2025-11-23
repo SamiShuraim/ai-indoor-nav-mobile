@@ -49,6 +49,9 @@ class BeaconScanner(
     private val _smoothedRssiMap = MutableStateFlow<Map<String, Double>>(emptyMap())
     val smoothedRssiMap: StateFlow<Map<String, Double>> = _smoothedRssiMap
     
+    // Raw RSSI data for ALL beacons (not just known ones) - for debugging
+    private val rawRssiData = ConcurrentHashMap<String, Pair<Double, Long>>() // MAC -> (RSSI, timestamp)
+    
     // Last update timestamp
     private var lastUpdateMs = 0L
     
@@ -139,7 +142,10 @@ class BeaconScanner(
         // Use MAC address as beacon ID (or parse from scan record if available)
         val beaconId = device.address?.uppercase() ?: return
         
-        // Filter: only track known beacons
+        // Store raw data for ALL beacons (for debugging/display)
+        rawRssiData[beaconId] = Pair(rssi, System.currentTimeMillis())
+        
+        // Filter: only track known beacons for localization
         if (knownBeaconIds.isNotEmpty() && beaconId !in knownBeaconIds) {
             return
         }
@@ -220,6 +226,21 @@ class BeaconScanner(
      */
     fun getCurrentRssiMap(): Map<String, Double> {
         return _smoothedRssiMap.value
+    }
+    
+    /**
+     * Get ALL nearby beacons (not just known ones)
+     * Returns: Map of MAC address to RSSI value
+     * Only includes beacons seen in the last 5 seconds
+     */
+    fun getAllNearbyBeacons(): Map<String, Double> {
+        val currentTime = System.currentTimeMillis()
+        val staleThreshold = 5000L // 5 seconds
+        
+        // Filter out stale beacons and return fresh ones
+        return rawRssiData
+            .filter { (_, data) -> currentTime - data.second < staleThreshold }
+            .mapValues { (_, data) -> data.first }
     }
     
     /**

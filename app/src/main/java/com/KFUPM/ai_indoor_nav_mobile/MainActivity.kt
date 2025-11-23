@@ -2689,15 +2689,30 @@ class MainActivity : AppCompatActivity() {
     private fun showNearbyBeacons() {
         lifecycleScope.launch {
             try {
-                // Get current RSSI map from beacon scanner
-                val rssiMap = localizationController.getBeaconScanner()?.getCurrentRssiMap() ?: emptyMap()
+                // Check if localization is running
+                if (!isLocalizationActive) {
+                    withContext(Dispatchers.Main) {
+                        android.app.AlertDialog.Builder(this@MainActivity)
+                            .setTitle("📡 Nearby Beacons")
+                            .setMessage("Localization is not active.\n\nPlease wait for the app to start tracking your position first.")
+                            .setPositiveButton("Close", null)
+                            .show()
+                    }
+                    return@launch
+                }
+                
+                // Get ALL nearby beacons (not just known ones)
+                val rssiMap = localizationController.getBeaconScanner()?.getAllNearbyBeacons() ?: emptyMap()
                 
                 if (rssiMap.isEmpty()) {
                     withContext(Dispatchers.Main) {
                         android.app.AlertDialog.Builder(this@MainActivity)
                             .setTitle("📡 Nearby Beacons")
-                            .setMessage("No beacons detected.\n\nMake sure Bluetooth is enabled and you're near beacons.")
+                            .setMessage("No beacons detected yet.\n\nMake sure:\n• Bluetooth is enabled\n• You're near beacons\n• Wait a few seconds for scanning")
                             .setPositiveButton("Close", null)
+                            .setNeutralButton("Retry") { _, _ ->
+                                showNearbyBeacons()
+                            }
                             .show()
                     }
                     return@launch
