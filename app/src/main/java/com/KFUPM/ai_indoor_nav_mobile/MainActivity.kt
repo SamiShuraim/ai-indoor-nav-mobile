@@ -467,13 +467,10 @@ class MainActivity : AppCompatActivity() {
                 // Update map display with all data
                 updateMapDisplayWithGeoJSON(poisGeoJSON, beaconsGeoJSON, routeNodesGeoJSON)
                 
-                // Initialize localization for this floor
-                // Skip if we've already done multi-floor initialization at startup
-                if (!hasInitializedMultiFloorLocalization) {
-                    initializeLocalization(floor.id)
-                } else {
-                    Log.d(TAG, "Skipping per-floor localization - already initialized with all floors")
-                }
+                // DON'T re-initialize localization when switching floors
+                // Localization is already running with ALL floors mapped
+                // The system will automatically track position on any floor
+                Log.d(TAG, "Floor switched to ${floor.name} - localization continues tracking")
                 
                 // Redraw navigation path for the new floor if navigation is active
                 if (currentNavigationPath != null) {
@@ -2071,61 +2068,54 @@ class MainActivity : AppCompatActivity() {
                         null
                     }
                     
-                    // Only show blue dot if user is on the currently displayed floor
                     val currentDisplayedFloorId = currentFloor?.id
-                    if (detectedFloorId != null && detectedFloorId == currentDisplayedFloorId) {
-                        // Update blue dot on map - user is on the correct floor
-                        updateLocalizationMarker(x, y, confidence)
-                    } else {
-                        // Hide blue dot - user is on a different floor
-                        clearLocalizationMarker()
+                    
+                    // Update floor selector to show current physical floor indicator
+                    if (nodeId != null && confidence > 0.6 && detectedFloorId != null) {
+                        withContext(Dispatchers.Main) {
+                            floorSelectorAdapter.setUserCurrentFloor(detectedFloorId)
+                        }
                     }
+                    
+                    // AUTO-SWITCH FLOOR if user has moved to a different floor
+                    if (detectedFloorId != null && detectedFloorId != currentDisplayedFloorId) {
+                        val userPhysicallyMoved = lastDetectedFloorId != null && lastDetectedFloorId != detectedFloorId
+                        val isInitial = currentDisplayedFloorId == null
+                        
+                        Log.d(TAG, "🚶 USER ON DIFFERENT FLOOR: displaying=$currentDisplayedFloorId, detected=$detectedFloorId, initial=$isInitial, moved=$userPhysicallyMoved")
+                        
+                        // Auto-switch if:
+                        // 1. Initial detection (no floor displayed yet), OR
+                        // 2. User physically moved between floors
+                        if (isInitial || userPhysicallyMoved) {
+                            val newFloor = floors.find { it.id == detectedFloorId }
+                            if (newFloor != null) {
+                                Log.d(TAG, "🔄 AUTO-SWITCHING to floor: ${newFloor.name}")
+                                withContext(Dispatchers.Main) {
+                                    selectFloor(newFloor)
+                                    
+                                    val message = if (isInitial) {
+                                        "📍 Located on ${newFloor.name}"
+                                    } else {
+                                        "🚶 Moved to ${newFloor.name}"
+                                    }
+                                    Toast.makeText(this@MainActivity, message, Toast.LENGTH_SHORT).show()
+                                }
+                            } else {
+                                Log.w(TAG, "⚠️ Floor $detectedFloorId not found in floors list")
+                            }
+                        }
+                        
+                        // Update last detected floor
+                        lastDetectedFloorId = detectedFloorId
+                    }
+                    
+                    // ALWAYS show blue dot when we have a position
+                    // Let the auto-switch handle floor changes
+                    updateLocalizationMarker(x, y, confidence)
                     
                     // Update navigation path progress
                     updateNavigationProgress(nodeId)
-                    
-                    // Update floor selector to show current physical floor indicator
-                    if (nodeId != null && confidence > 0.6) {
-                        if (detectedFloorId != null) {
-                            withContext(Dispatchers.Main) {
-                                floorSelectorAdapter.setUserCurrentFloor(detectedFloorId)
-                            }
-                            
-                            val currentFloorId = currentFloor?.id
-                            
-                            // Auto-switch in 3 cases:
-                            // 1. Initial detection (currentFloor is null)
-                            // 2. Navigation starts (handled by displayPath)
-                            // 3. User physically moved to a different floor (detectedFloorId changed)
-                            
-                            val userPhysicallyMoved = lastDetectedFloorId != null && lastDetectedFloorId != detectedFloorId
-                            val isInitial = currentFloorId == null
-                            
-                            if (isInitial || userPhysicallyMoved) {
-                                // User is on a different floor than currently displayed
-                                if (detectedFloorId != currentFloorId) {
-                                    Log.d(TAG, "Auto-switching: initial=$isInitial, physicallyMoved=$userPhysicallyMoved, from floor $lastDetectedFloorId to $detectedFloorId")
-                                    
-                                    val targetFloor = floors.find { it.id == detectedFloorId }
-                                    if (targetFloor != null) {
-                                        withContext(Dispatchers.Main) {
-                                            onFloorSelected(targetFloor)
-                                            
-                                            val message = if (isInitial) {
-                                                "📍 Located on ${targetFloor.name}"
-                                            } else {
-                                                "📍 You moved to ${targetFloor.name}"
-                                            }
-                                            Toast.makeText(this@MainActivity, message, Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                }
-                            }
-                            
-                            // Update last detected floor
-                            lastDetectedFloorId = detectedFloorId
-                        }
-                    }
 
                     // Request initial assignment once position is found
                     if (!hasRequestedInitialAssignment) {
