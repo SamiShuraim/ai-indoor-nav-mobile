@@ -1878,24 +1878,21 @@ class MainActivity : AppCompatActivity() {
             val source = GeoJsonSource(transitionIndicatorsSourceId, featureCollection)
             style.addSource(source)
             
-            // Add text layer with offset position and rectangular background
+            // Add text layer with offset position
             val textLayer = org.maplibre.android.style.layers.SymbolLayer(transitionIndicatorsLayerId, transitionIndicatorsSourceId)
                 .withProperties(
                     PropertyFactory.textField(get("text")),
                     PropertyFactory.textSize(14f),
                     PropertyFactory.textColor("#FFFFFF"), // White text
-                    PropertyFactory.textHaloColor("#000000"), // Black outline
-                    PropertyFactory.textHaloWidth(1.5f),
+                    PropertyFactory.textHaloColor("#000000"), // Black outline for high contrast
+                    PropertyFactory.textHaloWidth(2f),
                     PropertyFactory.textHaloBlur(0.5f),
                     PropertyFactory.textOffset(arrayOf(0f, -2.5f)), // Offset above node so it doesn't block
                     PropertyFactory.textAnchor("bottom"),
                     PropertyFactory.textAllowOverlap(true), // Always show
                     PropertyFactory.textIgnorePlacement(true), // Ignore collision
                     PropertyFactory.iconAllowOverlap(true),
-                    PropertyFactory.textOptional(false), // Text is required
-                    // Rectangular background
-                    PropertyFactory.textOpacityTransition(null),
-                    PropertyFactory.textPadding(4f)
+                    PropertyFactory.textOptional(false) // Text is required
                 )
             style.addLayer(textLayer)
             
