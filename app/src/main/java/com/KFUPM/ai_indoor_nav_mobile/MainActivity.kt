@@ -1948,7 +1948,7 @@ class MainActivity : AppCompatActivity() {
 
                 // Try auto-initialization first (determines position automatically)
                 val success = localizationController.autoInitialize(
-                    availableFloorIds = listOf(floorId),
+                    floorIds = listOf(floorId),
                     scanDurationMs = 5000 // 5 seconds
                 )
 
@@ -2010,7 +2010,7 @@ class MainActivity : AppCompatActivity() {
                 // Use auto-initialization with ALL floor IDs
                 // This will scan beacons and automatically determine which floor the user is on
                 val success = localizationController.autoInitialize(
-                    availableFloorIds = floorIds,
+                    floorIds = floorIds,
                     scanDurationMs = 5000 // 5 seconds
                 )
 
