@@ -1946,9 +1946,14 @@ class MainActivity : AppCompatActivity() {
                     isLocalizationActive = false
                 }
 
+                // Get ALL floor IDs for comprehensive beacon mapping
+                val allFloorIds = floors.map { it.id }
+                Log.d(TAG, "Mapping beacons from ALL ${allFloorIds.size} floors: $allFloorIds")
+
                 // Try auto-initialization first (determines position automatically)
+                // Pass ALL floor IDs so background mapper discovers ALL beacons
                 val success = localizationController.autoInitialize(
-                    floorIds = listOf(floorId),
+                    floorIds = allFloorIds,
                     scanDurationMs = 5000 // 5 seconds
                 )
 
@@ -1966,7 +1971,8 @@ class MainActivity : AppCompatActivity() {
                     Log.w(TAG, "Auto-initialization failed, trying manual initialization...")
 
                     // Fallback: manual initialization without specific starting position
-                    val manualSuccess = localizationController.initialize(floorId, null)
+                    // Still pass ALL floor IDs for background beacon mapping
+                    val manualSuccess = localizationController.initialize(floorId, null, allFloorIds)
                     if (manualSuccess) {
                         localizationController.start()
                         isLocalizationActive = true
