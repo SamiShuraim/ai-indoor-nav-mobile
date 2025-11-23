@@ -135,8 +135,8 @@ class LocalizationController(private val context: Context) {
                 
                 imuTracker = ImuTracker(context)
                 
-                // Start background mapping for ALL beacons across ALL floors
-                startBackgroundMapping()
+                // Background mapping disabled (not working reliably)
+                // startBackgroundMapping()
                 
                 Log.d(TAG, "Auto-initialization successful!")
                 Log.d(TAG, "Floor: ${result.floorId}, Initial node: ${result.initialNodeId}, Confidence: ${String.format("%.2f", result.confidence)}")
@@ -241,8 +241,8 @@ class LocalizationController(private val context: Context) {
                 
                 imuTracker = ImuTracker(context)
                 
-                // Start background mapping for ALL beacons across ALL floors
-                startBackgroundMapping()
+                // Background mapping disabled (not working reliably)
+                // startBackgroundMapping()
                 
                 Log.d(TAG, "✅ Localization initialized with ALL FLOORS")
                 Log.d(TAG, "Graph: ${graph.nodes.size} nodes, ${graph.edges.size} edges")
