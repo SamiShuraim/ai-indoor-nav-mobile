@@ -75,6 +75,7 @@ class MainActivity : AppCompatActivity() {
 
     private val apiService = ApiService()
     private lateinit var localizationController: LocalizationController
+    private lateinit var cacheManager: CacheManager
     private var isLocalizationActive = false
 
     // Visitor ID for QR code
@@ -185,8 +186,9 @@ class MainActivity : AppCompatActivity() {
         assignmentInfoText = findViewById(R.id.assignmentInfoText)
         btnRetryApi = findViewById(R.id.btnRetryApi)
 
-        // Initialize localization controller
+        // Initialize localization controller and cache manager
         localizationController = LocalizationController(this)
+        cacheManager = CacheManager(this)
 
         setupFloorSelector()
         mapView.onCreate(savedInstanceState)
@@ -253,7 +255,37 @@ class MainActivity : AppCompatActivity() {
     private fun initializeAppData() {
         lifecycleScope.launch {
             try {
-                Log.d(TAG, "Fetching buildings...")
+                Log.d(TAG, "Initializing app data...")
+                
+                // Try to use cached data first
+                if (cacheManager.isCacheValid()) {
+                    Log.d(TAG, "⚡ Using cached data for fast startup")
+                    
+                    val cachedBuildings = cacheManager.getCachedBuildings<Building>()
+                    val cachedFloors = cacheManager.getCachedFloors<Floor>()
+                    val cachedNodeMap = cacheManager.getCachedNodeToFloorMap()
+                    
+                    if (cachedBuildings != null && cachedFloors != null && cachedNodeMap != null) {
+                        // Use cached data
+                        currentBuilding = cachedBuildings.first()
+                        floors = cachedFloors.sortedByDescending { it.floorNumber }
+                        nodeToFloorMap.putAll(cachedNodeMap)
+                        
+                        Log.d(TAG, "✅ Loaded from cache: ${cachedBuildings.size} buildings, ${cachedFloors.size} floors, ${cachedNodeMap.size} node mappings")
+                        
+                        // Update UI
+                        floorSelectorAdapter.updateFloors(floors)
+                        floorSelectorContainer.visibility = View.VISIBLE
+                        
+                        // Load beacons from cache or fetch
+                        loadAllBeaconsForTrilateration()
+                        
+                        return@launch
+                    }
+                }
+                
+                // Cache invalid or missing - fetch fresh data
+                Log.d(TAG, "📡 Fetching fresh data from API")
                 val buildings = apiService.getBuildings()
                 
                 if (buildings.isNullOrEmpty()) {
@@ -261,6 +293,9 @@ class MainActivity : AppCompatActivity() {
                     showRetryButton()
                     return@launch
                 }
+                
+                // Cache buildings
+                cacheManager.cacheBuildings(buildings)
                 
                 // Select the first building
                 currentBuilding = buildings.first()
@@ -293,9 +328,16 @@ class MainActivity : AppCompatActivity() {
             val allRouteNodes = coroutineScope {
                 floors.map { floor ->
                     async { 
-                        apiService.getRouteNodesByFloor(floor.id)?.also { nodes ->
-                            Log.d(TAG, "Loaded ${nodes.size} nodes for floor ${floor.name}")
+                        // Try cache first
+                        var nodes = cacheManager.getCachedRouteNodes<RouteNode>(floor.id)
+                        if (nodes == null) {
+                            // Cache miss - fetch from API
+                            nodes = apiService.getRouteNodesByFloor(floor.id)
+                            if (nodes != null) {
+                                cacheManager.cacheRouteNodes(floor.id, nodes)
+                            }
                         }
+                        nodes?.also { Log.d(TAG, "Loaded ${it.size} nodes for floor ${floor.name}") }
                     }
                 }.awaitAll().filterNotNull().flatten()
             }
@@ -304,6 +346,9 @@ class MainActivity : AppCompatActivity() {
             allRouteNodes.forEach { node ->
                 nodeToFloorMap[node.id.toString()] = node.floorId
             }
+            
+            // Cache the mapping
+            cacheManager.cacheNodeToFloorMap(nodeToFloorMap.toMap())
             
             Log.d(TAG, "Loaded ${nodeToFloorMap.size} node-to-floor mappings across ${floors.size} floors")
         } catch (e: Exception) {
@@ -322,10 +367,17 @@ class MainActivity : AppCompatActivity() {
             // Load beacons for each floor in parallel
             val allBeacons = coroutineScope {
                 floors.map { floor ->
-                    async { 
-                        apiService.getBeaconsByFloor(floor.id)?.also { beacons ->
-                            Log.d(TAG, "Loaded ${beacons.size} beacons for floor ${floor.name}")
+                    async {
+                        // Try cache first
+                        var beacons = cacheManager.getCachedBeacons<Beacon>(floor.id)
+                        if (beacons == null) {
+                            // Cache miss - fetch from API
+                            beacons = apiService.getBeaconsByFloor(floor.id)
+                            if (beacons != null) {
+                                cacheManager.cacheBeacons(floor.id, beacons)
+                            }
                         }
+                        beacons?.also { Log.d(TAG, "Loaded ${it.size} beacons for floor ${floor.name}") }
                     }
                 }.awaitAll().filterNotNull().flatten()
             }
@@ -389,6 +441,9 @@ class MainActivity : AppCompatActivity() {
             
             floors = buildingFloors.sortedByDescending { it.floorNumber }
             Log.d(TAG, "Found ${floors.size} floors (sorted highest first): ${floors.map { "id=${it.id}, num=${it.floorNumber}, name=${it.name}" }}")
+            
+            // Cache floors
+            cacheManager.cacheFloors(floors)
             
             // Update floor selector
             floorSelectorAdapter.updateFloors(floors)
