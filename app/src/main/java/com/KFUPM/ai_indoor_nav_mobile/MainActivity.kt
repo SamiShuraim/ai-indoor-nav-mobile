@@ -1861,7 +1861,6 @@ class MainActivity : AppCompatActivity() {
             style.addSource(source)
             
             // Add white background circle layer first
-            val backgroundLayerId = "${transitionIndicatorsLayerId}_background"
             val backgroundLayer = CircleLayer(backgroundLayerId, transitionIndicatorsSourceId)
                 .withProperties(
                     circleRadius(18f), // Larger radius for background
