@@ -101,14 +101,18 @@ class BeaconScanner(
             .build()
         
         try {
+            Log.d(TAG, "Calling bluetoothLeScanner.startScan()...")
             bluetoothLeScanner?.startScan(null, scanSettings, scanCallback)
             isScanning = true
-            Log.d(TAG, "BLE scanning started")
+            Log.d(TAG, "✅ BLE scanning started successfully!")
             
             // Start periodic update job (1 Hz default)
             startUpdateJob()
+            Log.d(TAG, "✅ Update job started")
         } catch (e: SecurityException) {
-            Log.e(TAG, "SecurityException starting scan", e)
+            Log.e(TAG, "❌ SecurityException starting scan", e)
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Exception starting scan", e)
         }
     }
     

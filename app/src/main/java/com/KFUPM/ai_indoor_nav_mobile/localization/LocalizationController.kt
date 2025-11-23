@@ -271,7 +271,15 @@ class LocalizationController(private val context: Context) {
         }
         
         // Start sensors
-        beaconScanner?.startScanning()
+        Log.d(TAG, "🔍 Starting BeaconScanner...")
+        if (beaconScanner == null) {
+            Log.e(TAG, "❌ BeaconScanner is NULL! Cannot start scanning!")
+        } else {
+            Log.d(TAG, "✅ BeaconScanner exists, calling startScanning()...")
+            beaconScanner?.startScanning()
+        }
+        
+        Log.d(TAG, "🔍 Starting IMU tracker...")
         imuTracker?.startTracking()
         
         isRunning = true
