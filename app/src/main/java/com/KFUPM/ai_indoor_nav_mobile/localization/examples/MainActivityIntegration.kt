@@ -97,7 +97,7 @@ abstract class MainActivityIntegration : AppCompatActivity() {
                 showStatus("Scanning for beacons...")
                 
                 val success = localizationController.autoInitialize(
-                    availableFloorIds = availableFloorIds,
+                    floorIds = availableFloorIds,
                     scanDurationMs = 5000 // 5 seconds
                 )
                 
