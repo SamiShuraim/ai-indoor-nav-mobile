@@ -403,6 +403,13 @@ class LocalizationController(private val context: Context) {
     }
     
     /**
+     * Get the current floor ID (set by initialization)
+     */
+    fun getCurrentFloorId(): Int? {
+        return currentFloorId
+    }
+    
+    /**
      * Check for config updates
      */
     suspend fun checkForUpdates(): Boolean {
