@@ -16,10 +16,15 @@ class CacheManager(context: Context) {
     companion object {
         private const val TAG = "CacheManager"
         private const val KEY_BUILDINGS = "buildings"
+        private const val KEY_BUILDINGS_ETAG = "buildings_etag"
         private const val KEY_FLOORS = "floors"
+        private const val KEY_FLOORS_ETAG = "floors_etag"
         private const val KEY_BEACONS_PREFIX = "beacons_floor_"
+        private const val KEY_BEACONS_ETAG_PREFIX = "beacons_etag_floor_"
         private const val KEY_ROUTE_NODES_PREFIX = "route_nodes_floor_"
+        private const val KEY_ROUTE_NODES_ETAG_PREFIX = "route_nodes_etag_floor_"
         private const val KEY_POIS_PREFIX = "pois_floor_"
+        private const val KEY_POIS_ETAG_PREFIX = "pois_etag_floor_"
         private const val KEY_NODE_TO_FLOOR_MAP = "node_to_floor_map"
         private const val KEY_CACHE_TIMESTAMP = "cache_timestamp"
         private const val KEY_DATA_VERSION = "data_version"
@@ -55,23 +60,32 @@ class CacheManager(context: Context) {
     }
     
     /**
-     * Cache buildings data
+     * Cache buildings data with ETag
      */
-    fun <T> cacheBuildings(buildings: List<T>) {
+    fun <T> cacheBuildings(buildings: List<T>, etag: String? = null) {
         val json = gson.toJson(buildings)
-        prefs.edit().putString(KEY_BUILDINGS, json).apply()
+        val editor = prefs.edit()
+        editor.putString(KEY_BUILDINGS, json)
+        etag?.let { editor.putString(KEY_BUILDINGS_ETAG, it) }
+        editor.apply()
         updateCacheTimestamp()
-        Log.d(TAG, "Cached ${buildings.size} buildings")
+        Log.d(TAG, "Cached ${buildings.size} buildings" + if (etag != null) " with ETag: $etag" else "")
+    }
+    
+    /**
+     * Get ETag for buildings
+     */
+    fun getBuildingsETag(): String? {
+        return prefs.getString(KEY_BUILDINGS_ETAG, null)
     }
     
     /**
      * Get cached buildings
      */
-    inline fun <reified T> getCachedBuildings(): List<T>? {
+    fun <T> getCachedBuildings(typeToken: TypeToken<List<T>>): List<T>? {
         val json = prefs.getString(KEY_BUILDINGS, null) ?: return null
         return try {
-            val type = object : TypeToken<List<T>>() {}.type
-            gson.fromJson(json, type)
+            gson.fromJson(json, typeToken.type)
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing cached buildings", e)
             null
@@ -79,23 +93,32 @@ class CacheManager(context: Context) {
     }
     
     /**
-     * Cache floors data
+     * Cache floors data with ETag
      */
-    fun <T> cacheFloors(floors: List<T>) {
+    fun <T> cacheFloors(floors: List<T>, etag: String? = null) {
         val json = gson.toJson(floors)
-        prefs.edit().putString(KEY_FLOORS, json).apply()
+        val editor = prefs.edit()
+        editor.putString(KEY_FLOORS, json)
+        etag?.let { editor.putString(KEY_FLOORS_ETAG, it) }
+        editor.apply()
         updateCacheTimestamp()
-        Log.d(TAG, "Cached ${floors.size} floors")
+        Log.d(TAG, "Cached ${floors.size} floors" + if (etag != null) " with ETag: $etag" else "")
+    }
+    
+    /**
+     * Get ETag for floors
+     */
+    fun getFloorsETag(): String? {
+        return prefs.getString(KEY_FLOORS_ETAG, null)
     }
     
     /**
      * Get cached floors
      */
-    inline fun <reified T> getCachedFloors(): List<T>? {
+    fun <T> getCachedFloors(typeToken: TypeToken<List<T>>): List<T>? {
         val json = prefs.getString(KEY_FLOORS, null) ?: return null
         return try {
-            val type = object : TypeToken<List<T>>() {}.type
-            gson.fromJson(json, type)
+            gson.fromJson(json, typeToken.type)
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing cached floors", e)
             null
@@ -103,22 +126,31 @@ class CacheManager(context: Context) {
     }
     
     /**
-     * Cache beacons for a specific floor
+     * Cache beacons for a specific floor with ETag
      */
-    fun <T> cacheBeacons(floorId: Int, beacons: List<T>) {
+    fun <T> cacheBeacons(floorId: Int, beacons: List<T>, etag: String? = null) {
         val json = gson.toJson(beacons)
-        prefs.edit().putString("$KEY_BEACONS_PREFIX$floorId", json).apply()
-        Log.d(TAG, "Cached ${beacons.size} beacons for floor $floorId")
+        val editor = prefs.edit()
+        editor.putString("$KEY_BEACONS_PREFIX$floorId", json)
+        etag?.let { editor.putString("$KEY_BEACONS_ETAG_PREFIX$floorId", it) }
+        editor.apply()
+        Log.d(TAG, "Cached ${beacons.size} beacons for floor $floorId" + if (etag != null) " with ETag" else "")
+    }
+    
+    /**
+     * Get ETag for beacons of a floor
+     */
+    fun getBeaconsETag(floorId: Int): String? {
+        return prefs.getString("$KEY_BEACONS_ETAG_PREFIX$floorId", null)
     }
     
     /**
      * Get cached beacons for a floor
      */
-    inline fun <reified T> getCachedBeacons(floorId: Int): List<T>? {
+    fun <T> getCachedBeacons(floorId: Int, typeToken: TypeToken<List<T>>): List<T>? {
         val json = prefs.getString("$KEY_BEACONS_PREFIX$floorId", null) ?: return null
         return try {
-            val type = object : TypeToken<List<T>>() {}.type
-            gson.fromJson(json, type)
+            gson.fromJson(json, typeToken.type)
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing cached beacons for floor $floorId", e)
             null
@@ -126,22 +158,31 @@ class CacheManager(context: Context) {
     }
     
     /**
-     * Cache route nodes for a specific floor
+     * Cache route nodes for a specific floor with ETag
      */
-    fun <T> cacheRouteNodes(floorId: Int, routeNodes: List<T>) {
+    fun <T> cacheRouteNodes(floorId: Int, routeNodes: List<T>, etag: String? = null) {
         val json = gson.toJson(routeNodes)
-        prefs.edit().putString("$KEY_ROUTE_NODES_PREFIX$floorId", json).apply()
-        Log.d(TAG, "Cached ${routeNodes.size} route nodes for floor $floorId")
+        val editor = prefs.edit()
+        editor.putString("$KEY_ROUTE_NODES_PREFIX$floorId", json)
+        etag?.let { editor.putString("$KEY_ROUTE_NODES_ETAG_PREFIX$floorId", it) }
+        editor.apply()
+        Log.d(TAG, "Cached ${routeNodes.size} route nodes for floor $floorId" + if (etag != null) " with ETag" else "")
+    }
+    
+    /**
+     * Get ETag for route nodes of a floor
+     */
+    fun getRouteNodesETag(floorId: Int): String? {
+        return prefs.getString("$KEY_ROUTE_NODES_ETAG_PREFIX$floorId", null)
     }
     
     /**
      * Get cached route nodes for a floor
      */
-    inline fun <reified T> getCachedRouteNodes(floorId: Int): List<T>? {
+    fun <T> getCachedRouteNodes(floorId: Int, typeToken: TypeToken<List<T>>): List<T>? {
         val json = prefs.getString("$KEY_ROUTE_NODES_PREFIX$floorId", null) ?: return null
         return try {
-            val type = object : TypeToken<List<T>>() {}.type
-            gson.fromJson(json, type)
+            gson.fromJson(json, typeToken.type)
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing cached route nodes for floor $floorId", e)
             null
