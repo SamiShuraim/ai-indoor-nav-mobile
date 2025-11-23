@@ -32,6 +32,9 @@ class LocalizationController(private val context: Context) {
     private var currentFloorId: Int? = null
     private var availableFloorIds: List<Int> = emptyList()
     
+    // Floor detection (beacon-based, like AutoInitializer)
+    private var floorBeaconsCache: Map<Int, List<LocalizationBeacon>> = emptyMap()
+    
     // State
     private val _localizationState = MutableStateFlow<LocalizationState>(
         LocalizationState(
@@ -79,6 +82,17 @@ class LocalizationController(private val context: Context) {
                 config = result.config
                 currentFloorId = result.floorId
                 availableFloorIds = floorIds
+                
+                // Cache beacons by floor for beacon-based floor detection
+                val beaconsByFloor = mutableMapOf<Int, List<LocalizationBeacon>>()
+                for (fId in floorIds) {
+                    val floorBeacons = configProvider.fetchBeacons(fId, beaconNameMapper)
+                    if (floorBeacons != null) {
+                        beaconsByFloor[fId] = floorBeacons
+                    }
+                }
+                floorBeaconsCache = beaconsByFloor
+                Log.d(TAG, "✅ Cached beacons for ${floorBeaconsCache.size} floors for beacon-based detection")
                 
                 // Initialize components
                 graphModel = GraphModel(result.graph)
@@ -153,10 +167,13 @@ class LocalizationController(private val context: Context) {
                 
                 // Fetch beacons from ALL floors (not just current floor)
                 val allBeacons = mutableListOf<LocalizationBeacon>()
+                val beaconsByFloor = mutableMapOf<Int, List<LocalizationBeacon>>()
+                
                 for (fId in availableFloorIds) {
                     val floorBeacons = configProvider.fetchBeacons(fId, beaconNameMapper)
                     if (floorBeacons != null) {
                         allBeacons.addAll(floorBeacons)
+                        beaconsByFloor[fId] = floorBeacons
                     }
                 }
                 
@@ -165,7 +182,11 @@ class LocalizationController(private val context: Context) {
                     return@withContext false
                 }
                 
+                // Cache beacons by floor for beacon-based floor detection (SAME AS AUTOINITIALIZER)
+                floorBeaconsCache = beaconsByFloor
+                
                 Log.d(TAG, "✅ Loaded ${allBeacons.size} beacons from ALL floors")
+                Log.d(TAG, "✅ Cached beacons for ${floorBeaconsCache.size} floors for beacon-based detection")
                 
                 // Fetch COMBINED graph from ALL floors (THIS IS CRITICAL!)
                 val graph = configProvider.fetchCombinedGraph(availableFloorIds)
@@ -435,6 +456,50 @@ class LocalizationController(private val context: Context) {
     fun getTopNodes(count: Int = 3): List<String> {
         // Get top nodes directly from HMM engine's current posteriors
         return hmmEngine?.getTopNodes(count) ?: emptyList()
+    }
+    
+    /**
+     * Determine current floor using BEACON MATCHING (same logic as AutoInitializer)
+     * This is the method that WORKS at startup - now we use it continuously
+     */
+    fun detectFloorFromBeacons(): Int? {
+        val rssiMap = beaconScanner?.getCurrentRssiMap() ?: return null
+        if (rssiMap.isEmpty()) return null
+        
+        val visibleBeaconIds = rssiMap.keys
+        val floorScores = mutableMapOf<Int, Double>()
+        
+        // Score each floor based on beacon matches (EXACTLY like AutoInitializer)
+        for ((floorId, beacons) in floorBeaconsCache) {
+            val floorBeaconIds = beacons.map { it.id }.toSet()
+            
+            // Count matching beacons
+            val matchCount = visibleBeaconIds.count { it in floorBeaconIds }
+            
+            // Count mismatches
+            val mismatchCount = visibleBeaconIds.count { it !in floorBeaconIds }
+            
+            // Average RSSI of matching beacons
+            val avgRssi = if (matchCount > 0) {
+                visibleBeaconIds
+                    .filter { it in floorBeaconIds }
+                    .mapNotNull { rssiMap[it] }
+                    .average()
+            } else {
+                -100.0
+            }
+            
+            // Compute score (SAME formula as AutoInitializer)
+            val score = matchCount * 10.0 + (avgRssi + 100) / 10.0 - mismatchCount * 2.0
+            floorScores[floorId] = score
+            
+            Log.d(TAG, "🔍 Floor $floorId: matches=$matchCount, mismatches=$mismatchCount, avgRSSI=${String.format("%.1f", avgRssi)}, SCORE=${String.format("%.2f", score)}")
+        }
+        
+        // Return floor with highest score
+        val detectedFloor = floorScores.maxByOrNull { it.value }?.key
+        Log.d(TAG, "🎯 BEACON-BASED DETECTION: Floor $detectedFloor (visible beacons: ${visibleBeaconIds.size})")
+        return detectedFloor
     }
     
     /**
