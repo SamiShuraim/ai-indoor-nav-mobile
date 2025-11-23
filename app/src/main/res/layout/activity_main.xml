@@ -25,8 +25,8 @@
         android:layout_height="wrap_content"
         android:layout_gravity="top|start"
         android:layout_margin="16dp"
-        android:src="@drawable/ic_search"
-        android:contentDescription="Search POIs" />
+        android:src="@drawable/ic_bluetooth"
+        android:contentDescription="Show Nearby Beacons" />
 
     <com.google.android.material.floatingactionbutton.FloatingActionButton
         android:id="@+id/fabQrCode"
@@ -47,16 +47,6 @@
         android:src="@android:drawable/ic_menu_close_clear_cancel"
         android:contentDescription="Clear Path"
         android:visibility="gone" />
-
-    <com.google.android.material.floatingactionbutton.FloatingActionButton
-        android:id="@+id/fabBeaconStatus"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom|end"
-        android:layout_marginEnd="16dp"
-        android:layout_marginBottom="16dp"
-        android:src="@drawable/ic_bluetooth"
-        android:contentDescription="Beacon Mapping Status" />
 
     <!-- Floor Selector Component -->
     <LinearLayout

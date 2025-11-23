@@ -66,7 +66,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var fabSearch: FloatingActionButton
     private lateinit var fabClearPath: FloatingActionButton
     private lateinit var fabQrCode: FloatingActionButton
-    private lateinit var fabBeaconStatus: FloatingActionButton
     private lateinit var floorSelectorContainer: LinearLayout
     private lateinit var floorRecyclerView: RecyclerView
     private lateinit var floorSelectorAdapter: FloorSelectorAdapter
@@ -178,7 +177,6 @@ class MainActivity : AppCompatActivity() {
         fabSearch = findViewById(R.id.fabSearch)
         fabClearPath = findViewById(R.id.fabClearPath)
         fabQrCode = findViewById(R.id.fabQrCode)
-        fabBeaconStatus = findViewById(R.id.fabBeaconStatus)
         floorSelectorContainer = findViewById(R.id.floorSelectorContainer)
         floorRecyclerView = findViewById(R.id.floorRecyclerView)
         assignmentInfoContainer = findViewById(R.id.assignmentInfoContainer)
@@ -221,15 +219,7 @@ class MainActivity : AppCompatActivity() {
         }
         
         fabSearch.setOnClickListener {
-            val intent = Intent(this, POISearchActivity::class.java)
-
-            // Pass current building ID if available
-            currentBuilding?.let { building ->
-                intent.putExtra("building_id", building.id)
-                intent.putExtra("building_name", building.name)
-            }
-
-            poiSearchLauncher.launch(intent)
+            showNearbyBeacons()
         }
         
         fabClearPath.setOnClickListener {
@@ -238,10 +228,6 @@ class MainActivity : AppCompatActivity() {
 
         fabQrCode.setOnClickListener {
             showQrCodeDialog()
-        }
-        
-        fabBeaconStatus.setOnClickListener {
-            showBeaconMappingStatus()
         }
 
         btnRetryApi.setOnClickListener {
@@ -2698,81 +2684,73 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Show beacon mapping status dialog
+     * Show nearby Bluetooth beacons and their signal strengths
      */
-    private fun showBeaconMappingStatus() {
+    private fun showNearbyBeacons() {
         lifecycleScope.launch {
             try {
-                // Get cached beacon mappings only (no active scanning)
-                val cache = com.KFUPM.ai_indoor_nav_mobile.localization.BeaconMappingCache(this@MainActivity)
-                val cachedMappings = cache.getMappings()
+                // Get current RSSI map from beacon scanner
+                val rssiMap = localizationController.getBeaconScanner()?.getCurrentRssiMap() ?: emptyMap()
                 
-                // Get all beacon names from all floors
-                val allBeaconNames = mutableSetOf<String>()
-                for (floor in floors) {
-                    val beacons = apiService.getBeaconsByFloor(floor.id)
-                    beacons?.forEach { beacon ->
-                        if (!beacon.uuid.isNullOrBlank() || beacon.name != null) {
-                            beacon.name?.let { allBeaconNames.add(it) }
-                        }
+                if (rssiMap.isEmpty()) {
+                    withContext(Dispatchers.Main) {
+                        android.app.AlertDialog.Builder(this@MainActivity)
+                            .setTitle("📡 Nearby Beacons")
+                            .setMessage("No beacons detected.\n\nMake sure Bluetooth is enabled and you're near beacons.")
+                            .setPositiveButton("Close", null)
+                            .show()
                     }
+                    return@launch
                 }
                 
-                val mappedBeacons = allBeaconNames.filter { cachedMappings.containsKey(it) }
-                val unmappedBeacons = allBeaconNames.filter { !cachedMappings.containsKey(it) }
+                // Sort by signal strength (strongest first)
+                val sortedBeacons = rssiMap.entries.sortedByDescending { it.value }
                 
                 val message = buildString {
-                    append("📡 Cached Beacon Mappings\n\n")
-                    append("Total Beacons: ${allBeaconNames.size}\n")
-                    append("Mapped: ${mappedBeacons.size}\n")
-                    append("Unmapped: ${unmappedBeacons.size}\n\n")
+                    append("📡 Nearby Beacons (${sortedBeacons.size})\n")
+                    append("Sorted by signal strength\n\n")
                     
-                    if (mappedBeacons.isNotEmpty()) {
-                        append("✅ Mapped (${mappedBeacons.size}):\n")
-                        mappedBeacons.take(10).forEach { name ->
-                            val mac = cachedMappings[name]
-                            append("  • $name → $mac\n")
-                        }
-                        if (mappedBeacons.size > 10) {
-                            append("  ... and ${mappedBeacons.size - 10} more\n")
-                        }
-                        append("\n")
-                    }
-                    
-                    if (unmappedBeacons.isNotEmpty()) {
-                        append("⚠️ Unmapped (${unmappedBeacons.size}):\n")
-                        unmappedBeacons.take(10).forEach { beacon ->
-                            append("  • $beacon\n")
-                        }
-                        if (unmappedBeacons.size > 10) {
-                            append("  ... and ${unmappedBeacons.size - 10} more\n")
-                        }
-                        append("\n")
-                    }
-                    
-                    if (unmappedBeacons.isNotEmpty()) {
-                        append("ℹ️ Background scanning is disabled.\n")
-                        append("Unmapped beacons won't affect localization.")
+                    sortedBeacons.forEach { (beaconId, rssi) ->
+                        val signalBars = getSignalBars(rssi)
+                        val rssiFormatted = String.format("%.0f", rssi)
+                        append("$signalBars $beaconId\n")
+                        append("   RSSI: ${rssiFormatted} dBm\n\n")
                     }
                 }
                 
                 withContext(Dispatchers.Main) {
                     android.app.AlertDialog.Builder(this@MainActivity)
-                        .setTitle("Beacon Cache Status")
+                        .setTitle("📡 Nearby Beacons")
                         .setMessage(message)
                         .setPositiveButton("Close", null)
+                        .setNeutralButton("Refresh") { _, _ ->
+                            showNearbyBeacons()
+                        }
                         .show()
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error showing beacon status", e)
+                Log.e(TAG, "Error showing nearby beacons", e)
                 withContext(Dispatchers.Main) {
                     android.app.AlertDialog.Builder(this@MainActivity)
-                        .setTitle("Beacon Cache Status")
-                        .setMessage("📡 Cached Beacon Mappings\n\nCould not load beacon status.")
+                        .setTitle("📡 Nearby Beacons")
+                        .setMessage("Could not load beacon data.")
                         .setPositiveButton("Close", null)
                         .show()
                 }
             }
+        }
+    }
+    
+    /**
+     * Convert RSSI to signal bars
+     */
+    private fun getSignalBars(rssi: Double): String {
+        return when {
+            rssi >= -50 -> "📶📶📶📶" // Excellent
+            rssi >= -60 -> "📶📶📶"   // Good
+            rssi >= -70 -> "📶📶"     // Fair
+            rssi >= -80 -> "📶"       // Weak
+            else -> "📵"              // Very Weak
         }
     }
     

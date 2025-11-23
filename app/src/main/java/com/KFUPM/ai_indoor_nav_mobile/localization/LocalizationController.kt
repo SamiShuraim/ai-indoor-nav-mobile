@@ -469,6 +469,13 @@ class LocalizationController(private val context: Context) {
      * 
      * RATE LIMITED: Only checks floor every 2 seconds to avoid Android BLE scan limits
      */
+    /**
+     * Get the beacon scanner instance (for direct access to RSSI data)
+     */
+    fun getBeaconScanner(): BeaconScanner? {
+        return beaconScanner
+    }
+    
     fun detectFloorFromBeacons(): Int? {
         val currentTime = System.currentTimeMillis()
         
