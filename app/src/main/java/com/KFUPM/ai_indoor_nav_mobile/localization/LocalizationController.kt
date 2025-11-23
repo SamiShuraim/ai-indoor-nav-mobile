@@ -418,6 +418,20 @@ class LocalizationController(private val context: Context) {
     }
     
     /**
+     * Get the top 3 most likely nodes from current localization state
+     * Returns list of node IDs sorted by probability (highest first)
+     */
+    fun getTopNodes(count: Int = 3): List<String> {
+        val state = _localizationState.value
+        val topPosteriors = hmmEngine?.getTopPosteriors(
+            state.debug?.topPosteriors?.associate { it.first to it.second } ?: emptyMap(),
+            count
+        ) ?: emptyList()
+        
+        return topPosteriors.map { it.first }
+    }
+    
+    /**
      * Check for config updates
      */
     suspend fun checkForUpdates(): Boolean {

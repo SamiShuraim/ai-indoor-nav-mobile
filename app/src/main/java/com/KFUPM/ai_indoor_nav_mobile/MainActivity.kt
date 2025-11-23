@@ -2061,9 +2061,18 @@ class MainActivity : AppCompatActivity() {
                     val (x, y) = position
                     Log.d(TAG, "Localization: node=$nodeId, pos=($x, $y), confidence=${String.format("%.2f", confidence)}")
                     
-                    // Determine which floor the user is actually on
-                    val detectedFloorId = if (nodeId != null && confidence > 0.6) {
-                        nodeToFloorMap[nodeId]
+                    // SIMPLE FLOOR DETECTION: If nearest 3 nodes are from Floor X, you're on Floor X
+                    val topNodes = localizationController.getTopNodes(3)
+                    val detectedFloorId = if (topNodes.isNotEmpty()) {
+                        // Get floor IDs for top 3 nodes
+                        val floorIds = topNodes.mapNotNull { nodeToFloorMap[it] }
+                        
+                        // Count which floor appears most
+                        val floorCounts = floorIds.groupingBy { it }.eachCount()
+                        val mostCommonFloor = floorCounts.maxByOrNull { it.value }?.key
+                        
+                        Log.d(TAG, "Top nodes: $topNodes, Floor IDs: $floorIds, Detected floor: $mostCommonFloor")
+                        mostCommonFloor
                     } else {
                         null
                     }
@@ -2077,38 +2086,25 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                     
-                    // AUTO-SWITCH FLOOR if user has moved to a different floor
+                    // AUTO-SWITCH FLOOR IMMEDIATELY when detected floor changes
                     if (detectedFloorId != null && detectedFloorId != currentDisplayedFloorId) {
-                        val userPhysicallyMoved = lastDetectedFloorId != null && lastDetectedFloorId != detectedFloorId
-                        val isInitial = currentDisplayedFloorId == null
+                        Log.d(TAG, "🚶 FLOOR CHANGED: $currentDisplayedFloorId → $detectedFloorId")
                         
-                        Log.d(TAG, "🚶 USER ON DIFFERENT FLOOR: displaying=$currentDisplayedFloorId, detected=$detectedFloorId, initial=$isInitial, moved=$userPhysicallyMoved")
-                        
-                        // Auto-switch if:
-                        // 1. Initial detection (no floor displayed yet), OR
-                        // 2. User physically moved between floors
-                        if (isInitial || userPhysicallyMoved) {
-                            val newFloor = floors.find { it.id == detectedFloorId }
-                            if (newFloor != null) {
-                                Log.d(TAG, "🔄 AUTO-SWITCHING to floor: ${newFloor.name}")
-                                withContext(Dispatchers.Main) {
-                                    selectFloor(newFloor)
-                                    
-                                    val message = if (isInitial) {
-                                        "📍 Located on ${newFloor.name}"
-                                    } else {
-                                        "🚶 Moved to ${newFloor.name}"
-                                    }
-                                    Toast.makeText(this@MainActivity, message, Toast.LENGTH_SHORT).show()
+                        val newFloor = floors.find { it.id == detectedFloorId }
+                        if (newFloor != null) {
+                            Log.d(TAG, "🔄 SWITCHING to floor: ${newFloor.name}")
+                            withContext(Dispatchers.Main) {
+                                selectFloor(newFloor)
+                                
+                                if (currentDisplayedFloorId != null) {
+                                    Toast.makeText(this@MainActivity, "🚶 ${newFloor.name}", Toast.LENGTH_SHORT).show()
                                 }
-                            } else {
-                                Log.w(TAG, "⚠️ Floor $detectedFloorId not found in floors list")
                             }
                         }
-                        
-                        // Update last detected floor
-                        lastDetectedFloorId = detectedFloorId
                     }
+                    
+                    // Update last detected floor
+                    lastDetectedFloorId = detectedFloorId
                     
                     // ALWAYS show blue dot when we have a position
                     // Let the auto-switch handle floor changes
