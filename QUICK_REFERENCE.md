@@ -109,7 +109,7 @@ localization/
 ├── ObservationModel.kt             [Rank + pairwise]
 ├── TransitionModel.kt              [Speed gate + bias]
 ├── HmmEngine.kt                    [Viterbi + hysteresis]
-├── ConfigProvider.kt               [API + cache]
+├── ConfigProvider.kt               [API]
 ├── LocalizationController.kt       [Main API ⭐]
 └── examples/LocalizationExample.kt [Full example]
 ```

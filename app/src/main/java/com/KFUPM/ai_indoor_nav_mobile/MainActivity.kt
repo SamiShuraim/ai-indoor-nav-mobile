@@ -75,7 +75,6 @@ class MainActivity : AppCompatActivity() {
 
     private val apiService = ApiService()
     private lateinit var localizationController: LocalizationController
-    private lateinit var cacheManager: CacheManager
     private var isLocalizationActive = false
 
     // Visitor ID for QR code
@@ -90,7 +89,7 @@ class MainActivity : AppCompatActivity() {
     
     // Mapping of node ID to floor ID for automatic floor switching
     private val nodeToFloorMap = mutableMapOf<String, Int>()
-
+    
     // Data
     private var currentBuilding: Building? = null
     private var floors: List<Floor> = emptyList()
@@ -134,8 +133,6 @@ class MainActivity : AppCompatActivity() {
     private var targetNavigationLevel: Int? = null
     private val visitedPathNodeIds = mutableSetOf<Int>()
     
-    // Cache for node types (to avoid repeated API calls)
-    private val nodeTypeCache = mutableMapOf<Int, String?>()
     companion object {
         private const val TAG = "MainActivity"
     }
@@ -186,9 +183,8 @@ class MainActivity : AppCompatActivity() {
         assignmentInfoText = findViewById(R.id.assignmentInfoText)
         btnRetryApi = findViewById(R.id.btnRetryApi)
 
-        // Initialize localization controller and cache manager
+        // Initialize localization controller
         localizationController = LocalizationController(this)
-        cacheManager = CacheManager(this)
 
         setupFloorSelector()
         mapView.onCreate(savedInstanceState)
