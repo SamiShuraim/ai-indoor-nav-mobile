@@ -82,14 +82,19 @@ class BeaconScanner(
         }
         
         if (!checkPermissions()) {
-            Log.e(TAG, "Missing Bluetooth permissions")
+            Log.e(TAG, "❌ CRITICAL: Missing Bluetooth permissions! Scanning CANNOT start!")
+            Log.e(TAG, "Required permissions: BLUETOOTH_SCAN, BLUETOOTH_CONNECT, ACCESS_FINE_LOCATION")
             return
         }
         
         if (bluetoothAdapter?.isEnabled != true) {
-            Log.e(TAG, "Bluetooth is not enabled")
+            Log.e(TAG, "❌ CRITICAL: Bluetooth is NOT ENABLED! Scanning CANNOT start!")
+            Log.e(TAG, "Please enable Bluetooth in Android settings")
             return
         }
+        
+        Log.d(TAG, "✅ Bluetooth permissions OK")
+        Log.d(TAG, "✅ Bluetooth is enabled")
         
         val scanSettings = ScanSettings.Builder()
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)

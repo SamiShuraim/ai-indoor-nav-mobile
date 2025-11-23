@@ -1954,13 +1954,21 @@ class MainActivity : AppCompatActivity() {
                     // Observe position updates (assignment will be requested once position is found)
                     observeLocalizationUpdates()
 
-                    Log.d(TAG, "Localization started successfully")
+                    Log.d(TAG, "✅ Localization started successfully")
                     Toast.makeText(this@MainActivity, "Indoor positioning active", Toast.LENGTH_SHORT).show()
                 } else {
-                    Log.w(TAG, "Auto-initialization failed, trying manual initialization...")
+                    Log.e(TAG, "❌ Auto-initialization FAILED - no beacons detected during 5s scan!")
+                    Log.e(TAG, "Possible causes:")
+                    Log.e(TAG, "  1. Bluetooth is OFF")
+                    Log.e(TAG, "  2. Bluetooth permissions denied")
+                    Log.e(TAG, "  3. No beacons are broadcasting nearby")
+                    Log.e(TAG, "  4. Beacons are not in the database")
+                    
+                    Toast.makeText(this@MainActivity, "⚠️ Cannot detect beacons - check Bluetooth", Toast.LENGTH_LONG).show()
 
                     // Fallback: manual initialization without specific starting position
                     // Still pass ALL floor IDs for background beacon mapping
+                    Log.w(TAG, "Trying manual initialization as fallback...")
                     val manualSuccess = localizationController.initialize(floorId, null, allFloorIds)
                     if (manualSuccess) {
                         localizationController.start()
@@ -1968,6 +1976,9 @@ class MainActivity : AppCompatActivity() {
 
                         // Observe position updates (assignment will be requested once position is found)
                         observeLocalizationUpdates()
+                        
+                        Log.d(TAG, "✅ Manual initialization succeeded")
+                        Toast.makeText(this@MainActivity, "Positioning started (no initial position)", Toast.LENGTH_SHORT).show()
 
                         Log.d(TAG, "Localization started with manual initialization")
                     } else {

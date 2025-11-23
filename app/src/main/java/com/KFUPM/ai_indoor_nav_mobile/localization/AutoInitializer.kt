@@ -49,15 +49,19 @@ class AutoInitializer(
             Log.d(TAG, "Starting auto-initialization...")
             
             // Step 1: Scan for beacons
-            Log.d(TAG, "Scanning for beacons (${scanDurationMs}ms)...")
+            Log.d(TAG, "🔍 Scanning for beacons (${scanDurationMs}ms)...")
             val rssiMap = scanForBeacons(scanDurationMs)
             
             if (rssiMap.isEmpty()) {
-                Log.e(TAG, "No beacons detected")
+                Log.e(TAG, "❌ NO BEACONS DETECTED during ${scanDurationMs}ms scan!")
+                Log.e(TAG, "This means:")
+                Log.e(TAG, "  - Either Bluetooth is OFF")
+                Log.e(TAG, "  - Or permissions are denied")
+                Log.e(TAG, "  - Or no BLE devices are nearby at all")
                 return null
             }
             
-            Log.d(TAG, "Detected ${rssiMap.size} beacons: ${rssiMap.keys}")
+            Log.d(TAG, "✅ Detected ${rssiMap.size} beacons: ${rssiMap.keys}")
             
             // Step 2: Fetch beacons for all floors to determine which floor we're on
             Log.d(TAG, "Fetching beacon data for ${availableFloorIds.size} floors...")
