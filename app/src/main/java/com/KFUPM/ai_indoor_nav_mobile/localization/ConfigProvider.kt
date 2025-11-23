@@ -133,7 +133,7 @@ class ConfigProvider(private val context: Context) {
                                 .filter { it.uuid.isNullOrBlank() && it.name != null }
                                 .mapNotNull { it.name }
                             
-                            Log.d(TAG, "Found ${beaconNames.size} beacon names for background mapping")
+                            Log.d(TAG, "Found ${beaconNames.size} beacon names for floor $floorId")
                             beaconNames
                         } else null
                     } else {
@@ -145,6 +145,30 @@ class ConfigProvider(private val context: Context) {
                 Log.e(TAG, "Error fetching beacon names", e)
                 null
             }
+        }
+    }
+    
+    /**
+     * Get ALL beacon names from ALL floors (for comprehensive background mapping)
+     */
+    suspend fun fetchAllBeaconNames(floorIds: List<Int>): List<String> {
+        return withContext(Dispatchers.IO) {
+            val allBeaconNames = mutableSetOf<String>()
+            
+            floorIds.forEach { floorId ->
+                try {
+                    val beaconNames = fetchBeaconNames(floorId)
+                    if (beaconNames != null) {
+                        allBeaconNames.addAll(beaconNames)
+                        Log.d(TAG, "Added ${beaconNames.size} beacon names from floor $floorId")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error fetching beacon names for floor $floorId", e)
+                }
+            }
+            
+            Log.d(TAG, "Total beacon names across all floors: ${allBeaconNames.size}")
+            allBeaconNames.toList()
         }
     }
     

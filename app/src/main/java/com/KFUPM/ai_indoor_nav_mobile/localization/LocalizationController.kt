@@ -30,6 +30,7 @@ class LocalizationController(private val context: Context) {
     // Configuration
     private var config: LocalizationConfig = LocalizationConfig(version = "default")
     private var currentFloorId: Int? = null
+    private var availableFloorIds: List<Int> = emptyList()
     
     // State
     private val _localizationState = MutableStateFlow<LocalizationState>(
@@ -77,6 +78,7 @@ class LocalizationController(private val context: Context) {
                 // Update config
                 config = result.config
                 currentFloorId = result.floorId
+                availableFloorIds = availableFloorIds
                 
                 // Initialize components
                 graphModel = GraphModel(result.graph)
@@ -114,8 +116,8 @@ class LocalizationController(private val context: Context) {
                 
                 imuTracker = ImuTracker(context)
                 
-                // Start background mapping for any unmapped beacons
-                startBackgroundMapping(result.floorId)
+                // Start background mapping for ALL beacons across ALL floors
+                startBackgroundMapping()
                 
                 Log.d(TAG, "Auto-initialization successful!")
                 Log.d(TAG, "Floor: ${result.floorId}, Initial node: ${result.initialNodeId}, Confidence: ${String.format("%.2f", result.confidence)}")
@@ -130,8 +132,12 @@ class LocalizationController(private val context: Context) {
     
     /**
      * Initialize localization for a specific floor (manual mode)
+     * 
+     * @param floorId The floor to initialize localization for
+     * @param initialNodeId Optional initial node ID
+     * @param allFloorIds List of all available floor IDs for comprehensive beacon mapping (optional)
      */
-    suspend fun initialize(floorId: Int, initialNodeId: String? = null): Boolean {
+    suspend fun initialize(floorId: Int, initialNodeId: String? = null, allFloorIds: List<Int>? = null): Boolean {
         return withContext(Dispatchers.IO) {
             try {
                 Log.d(TAG, "Initializing localization for floor $floorId")
@@ -161,6 +167,7 @@ class LocalizationController(private val context: Context) {
                 
                 // Initialize components
                 currentFloorId = floorId
+                availableFloorIds = allFloorIds ?: listOf(floorId)
                 
                 graphModel = GraphModel(graph)
                 observationModel = ObservationModel(
@@ -197,8 +204,8 @@ class LocalizationController(private val context: Context) {
                 
                 imuTracker = ImuTracker(context)
                 
-                // Start background mapping for any unmapped beacons
-                startBackgroundMapping(floorId)
+                // Start background mapping for ALL beacons across ALL floors
+                startBackgroundMapping()
                 
                 Log.d(TAG, "Localization initialized successfully")
                 Log.d(TAG, "Graph: ${graph.nodes.size} nodes, ${graph.edges.size} edges")
@@ -435,7 +442,7 @@ class LocalizationController(private val context: Context) {
      */
     suspend fun reload(): Boolean {
         val floorId = currentFloorId ?: return false
-        return initialize(floorId, hmmEngine?.getCurrentNode())
+        return initialize(floorId, hmmEngine?.getCurrentNode(), availableFloorIds)
     }
     
     /**
@@ -455,37 +462,52 @@ class LocalizationController(private val context: Context) {
     }
     
     /**
-     * Start background mapping for unmapped beacons
+     * Start background mapping for unmapped beacons across ALL floors
+     * This ensures that any beacon from any floor will be discovered and mapped
      */
-    private fun startBackgroundMapping(floorId: Int) {
+    private fun startBackgroundMapping() {
         scope.launch {
             try {
-                // Fetch all beacon names for this floor
-                val beaconNames = configProvider.fetchBeaconNames(floorId)
-                if (beaconNames.isNullOrEmpty()) {
-                    Log.d(TAG, "No beacon names to map")
+                if (availableFloorIds.isEmpty()) {
+                    Log.w(TAG, "No floor IDs available for background mapping")
                     return@launch
                 }
+                
+                // Fetch ALL beacon names from ALL floors
+                Log.d(TAG, "Fetching beacon names from ${availableFloorIds.size} floors for comprehensive background mapping")
+                val allBeaconNames = configProvider.fetchAllBeaconNames(availableFloorIds)
+                
+                if (allBeaconNames.isEmpty()) {
+                    Log.d(TAG, "No beacon names to map across all floors")
+                    return@launch
+                }
+                
+                Log.d(TAG, "Found ${allBeaconNames.size} total beacon names across all floors")
                 
                 // Check if all beacons are already mapped
-                if (beaconNameMapper?.areAllMapped(beaconNames) == true) {
-                    Log.d(TAG, "All beacons already mapped, no background mapping needed")
+                if (beaconNameMapper?.areAllMapped(allBeaconNames) == true) {
+                    Log.d(TAG, "All ${allBeaconNames.size} beacons already mapped, no background mapping needed")
                     return@launch
                 }
                 
-                // Start background mapper
+                val unmappedCount = beaconNameMapper?.getUnmappedBeacons(allBeaconNames)?.size ?: allBeaconNames.size
+                Log.d(TAG, "Starting background mapping for $unmappedCount unmapped beacons (across all floors)")
+                
+                // Start background mapper with ALL beacon names
                 backgroundMapper = BackgroundBeaconMapper(context)
-                backgroundMapper?.start(beaconNames) {
+                backgroundMapper?.start(allBeaconNames) {
                     // Callback when mapping is complete
-                    Log.d(TAG, "Background mapping complete! All beacons are now mapped.")
+                    Log.d(TAG, "Background mapping complete! All ${allBeaconNames.size} beacons are now mapped.")
                     
-                    // Optionally, refresh beacon list with newly mapped beacons
-                    scope.launch {
-                        refreshBeaconList(floorId)
+                    // Refresh beacon list for current floor with newly mapped beacons
+                    currentFloorId?.let { floorId ->
+                        scope.launch {
+                            refreshBeaconList(floorId)
+                        }
                     }
                 }
                 
-                Log.d(TAG, "Background beacon mapping started")
+                Log.d(TAG, "Background beacon mapping started for all floors")
             } catch (e: Exception) {
                 Log.e(TAG, "Error starting background mapping", e)
             }
