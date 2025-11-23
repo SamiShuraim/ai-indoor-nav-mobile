@@ -2730,11 +2730,6 @@ class MainActivity : AppCompatActivity() {
     private fun showBeaconMappingStatus() {
         val status = localizationController.getBackgroundMapperStatus()
         
-        val dialog = Dialog(this)
-        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
-        dialog.setContentView(android.R.layout.select_dialog_item)
-        dialog.window?.setLayout(800, LinearLayout.LayoutParams.WRAP_CONTENT)
-        
         val message = if (status != null) {
             val progressPercent = (status.progress * 100).toInt()
             buildString {
@@ -2767,11 +2762,23 @@ class MainActivity : AppCompatActivity() {
             "Background mapping not active.\nBeacons are loaded from cache."
         }
         
-        android.app.AlertDialog.Builder(this)
+        val builder = android.app.AlertDialog.Builder(this)
             .setTitle("Beacon Mapping Status")
             .setMessage(message)
-            .setPositiveButton("OK", null)
-            .show()
+            .setPositiveButton("Close", null)
+        
+        // Add "Force Scan" button if mapping is active and not complete
+        if (status != null && !status.isComplete) {
+            builder.setNeutralButton("🔍 Force Scan Now") { _, _ ->
+                lifecycleScope.launch {
+                    Toast.makeText(this@MainActivity, "Scanning for 2 seconds...", Toast.LENGTH_SHORT).show()
+                    localizationController.forceScanForBeacons()
+                    Toast.makeText(this@MainActivity, "Scan complete! Check status again.", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        
+        builder.show()
     }
     
     override fun onStart() { super.onStart(); mapView.onStart() }

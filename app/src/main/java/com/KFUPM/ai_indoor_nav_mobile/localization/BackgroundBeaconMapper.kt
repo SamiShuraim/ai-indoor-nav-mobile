@@ -245,6 +245,43 @@ class BackgroundBeaconMapper(private val context: Context) {
     }
     
     /**
+     * Force an immediate scan for unmapped beacons
+     * Useful when user is standing near beacons and wants immediate detection
+     */
+    suspend fun forceScan() {
+        if (!isRunning.get()) {
+            Log.w(TAG, "Background mapper not running, cannot force scan")
+            return
+        }
+        
+        if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) {
+            Log.e(TAG, "Bluetooth not available or not enabled")
+            return
+        }
+        
+        Log.d(TAG, "Force scan triggered by user")
+        
+        // Perform a longer, more aggressive scan
+        try {
+            val settings = ScanSettings.Builder()
+                .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY) // Maximum power for detection
+                .build()
+            
+            bluetoothLeScanner?.startScan(null, settings, scanCallback)
+            
+            // Scan for 2 seconds (longer than normal)
+            delay(2000)
+            
+            bluetoothLeScanner?.stopScan(scanCallback)
+            
+            Log.d(TAG, "Force scan complete")
+            logProgress()
+        } catch (e: SecurityException) {
+            Log.e(TAG, "SecurityException during force scan", e)
+        }
+    }
+    
+    /**
      * Check if all beacons are mapped
      */
     fun isComplete(): Boolean {

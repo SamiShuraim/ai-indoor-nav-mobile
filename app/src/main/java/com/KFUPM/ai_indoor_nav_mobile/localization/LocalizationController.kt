@@ -584,6 +584,13 @@ class LocalizationController(private val context: Context) {
     }
     
     /**
+     * Force an immediate scan for unmapped beacons
+     */
+    suspend fun forceScanForBeacons() {
+        backgroundMapper?.forceScan()
+    }
+    
+    /**
      * Clean up resources
      */
     fun cleanup() {
