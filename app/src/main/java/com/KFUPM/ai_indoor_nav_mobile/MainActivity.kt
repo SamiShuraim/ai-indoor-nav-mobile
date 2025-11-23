@@ -257,34 +257,8 @@ class MainActivity : AppCompatActivity() {
             try {
                 Log.d(TAG, "Initializing app data...")
                 
-                // Try to use cached data first
-                if (cacheManager.isCacheValid()) {
-                    Log.d(TAG, "⚡ Using cached data for fast startup")
-                    
-                    val cachedBuildings = cacheManager.getCachedBuildings<Building>()
-                    val cachedFloors = cacheManager.getCachedFloors<Floor>()
-                    val cachedNodeMap = cacheManager.getCachedNodeToFloorMap()
-                    
-                    if (cachedBuildings != null && cachedFloors != null && cachedNodeMap != null) {
-                        // Use cached data
-                        currentBuilding = cachedBuildings.first()
-                        floors = cachedFloors.sortedByDescending { it.floorNumber }
-                        nodeToFloorMap.putAll(cachedNodeMap)
-                        
-                        Log.d(TAG, "✅ Loaded from cache: ${cachedBuildings.size} buildings, ${cachedFloors.size} floors, ${cachedNodeMap.size} node mappings")
-                        
-                        // Update UI
-                        floorSelectorAdapter.updateFloors(floors)
-                        floorSelectorContainer.visibility = View.VISIBLE
-                        
-                        // Load beacons from cache or fetch
-                        loadAllBeaconsForTrilateration()
-                        
-                        return@launch
-                    }
-                }
-                
-                // Cache invalid or missing - fetch fresh data
+                // TODO: Caching disabled - waiting for backend versioning endpoint
+                // Will re-enable once backend provides data version checking
                 Log.d(TAG, "📡 Fetching fresh data from API")
                 val buildings = apiService.getBuildings()
                 
@@ -293,9 +267,6 @@ class MainActivity : AppCompatActivity() {
                     showRetryButton()
                     return@launch
                 }
-                
-                // Cache buildings
-                cacheManager.cacheBuildings(buildings)
                 
                 // Select the first building
                 currentBuilding = buildings.first()
@@ -328,16 +299,9 @@ class MainActivity : AppCompatActivity() {
             val allRouteNodes = coroutineScope {
                 floors.map { floor ->
                     async { 
-                        // Try cache first
-                        var nodes = cacheManager.getCachedRouteNodes<RouteNode>(floor.id)
-                        if (nodes == null) {
-                            // Cache miss - fetch from API
-                            nodes = apiService.getRouteNodesByFloor(floor.id)
-                            if (nodes != null) {
-                                cacheManager.cacheRouteNodes(floor.id, nodes)
-                            }
+                        apiService.getRouteNodesByFloor(floor.id)?.also { nodes ->
+                            Log.d(TAG, "Loaded ${nodes.size} nodes for floor ${floor.name}")
                         }
-                        nodes?.also { Log.d(TAG, "Loaded ${it.size} nodes for floor ${floor.name}") }
                     }
                 }.awaitAll().filterNotNull().flatten()
             }
@@ -346,9 +310,6 @@ class MainActivity : AppCompatActivity() {
             allRouteNodes.forEach { node ->
                 nodeToFloorMap[node.id.toString()] = node.floorId
             }
-            
-            // Cache the mapping
-            cacheManager.cacheNodeToFloorMap(nodeToFloorMap.toMap())
             
             Log.d(TAG, "Loaded ${nodeToFloorMap.size} node-to-floor mappings across ${floors.size} floors")
         } catch (e: Exception) {
@@ -367,17 +328,10 @@ class MainActivity : AppCompatActivity() {
             // Load beacons for each floor in parallel
             val allBeacons = coroutineScope {
                 floors.map { floor ->
-                    async {
-                        // Try cache first
-                        var beacons = cacheManager.getCachedBeacons<Beacon>(floor.id)
-                        if (beacons == null) {
-                            // Cache miss - fetch from API
-                            beacons = apiService.getBeaconsByFloor(floor.id)
-                            if (beacons != null) {
-                                cacheManager.cacheBeacons(floor.id, beacons)
-                            }
+                    async { 
+                        apiService.getBeaconsByFloor(floor.id)?.also { beacons ->
+                            Log.d(TAG, "Loaded ${beacons.size} beacons for floor ${floor.name}")
                         }
-                        beacons?.also { Log.d(TAG, "Loaded ${it.size} beacons for floor ${floor.name}") }
                     }
                 }.awaitAll().filterNotNull().flatten()
             }
@@ -442,8 +396,6 @@ class MainActivity : AppCompatActivity() {
             floors = buildingFloors.sortedByDescending { it.floorNumber }
             Log.d(TAG, "Found ${floors.size} floors (sorted highest first): ${floors.map { "id=${it.id}, num=${it.floorNumber}, name=${it.name}" }}")
             
-            // Cache floors
-            cacheManager.cacheFloors(floors)
             
             // Update floor selector
             floorSelectorAdapter.updateFloors(floors)
@@ -1560,9 +1512,8 @@ class MainActivity : AppCompatActivity() {
             style.getLayer(pastPathNodesLayerId)?.let { style.removeLayer(pastPathNodesLayerId) }
             style.getLayer(pastPathEdgesLayerId)?.let { style.removeLayer(pastPathEdgesLayerId) }
             
-            // Remove transition indicators (both text and background layers)
+            // Remove transition indicators
             style.getLayer(transitionIndicatorsLayerId)?.let { style.removeLayer(transitionIndicatorsLayerId) }
-            style.getLayer("${transitionIndicatorsLayerId}_background")?.let { style.removeLayer("${transitionIndicatorsLayerId}_background") }
             
             // Remove sources
             style.getSource(pathNodesSourceId)?.let { style.removeSource(pathNodesSourceId) }
@@ -1835,9 +1786,8 @@ class MainActivity : AppCompatActivity() {
                         if (fromFloorId != toFloorId && fromFloorId != null && toFloorId != null) {
                             Log.d(TAG, "Found floor transition edge: $fromNodeId (floor $fromFloorId) -> $toNodeId (floor $toFloorId)")
                             
-                            // Show indicator on the FROM floor (where user needs to take action)
+                            // Show "Go up/down" indicator on FROM floor
                             if (fromFloorId == currentFloorId) {
-                                // Find the FROM node to get its position
                                 val fromNode = pathNodes.find { 
                                     val nodeIdStr = it.getStringProperty("id")
                                     nodeIdStr?.toIntOrNull() == fromNodeId
@@ -1846,7 +1796,6 @@ class MainActivity : AppCompatActivity() {
                                 if (fromNode != null) {
                                     val geometry = fromNode.geometry()
                                     if (geometry is Point) {
-                                        // Determine direction (up or down)
                                         val fromFloor = floors.find { it.id == fromFloorId }
                                         val toFloor = floors.find { it.id == toFloorId }
                                         
@@ -1856,12 +1805,31 @@ class MainActivity : AppCompatActivity() {
                                             
                                             val indicator = Feature.fromGeometry(geometry)
                                             indicator.addStringProperty("text", text)
-                                            indicator.addStringProperty("direction", direction)
-                                            indicator.addNumberProperty("targetFloor", toFloor.floorNumber)
+                                            indicator.addStringProperty("type", "transition")
                                             transitionFeatures.add(indicator)
                                             
-                                            Log.d(TAG, "  ✅ Creating indicator '$text' at node $fromNodeId on ${fromFloor.name}")
+                                            Log.d(TAG, "  ✅ Creating 'go $direction' indicator at node $fromNodeId on ${fromFloor.name}")
                                         }
+                                    }
+                                }
+                            }
+                            
+                            // Show "This floor" indicator on TO floor (destination)
+                            if (toFloorId == currentFloorId) {
+                                val toNode = pathNodes.find { 
+                                    val nodeIdStr = it.getStringProperty("id")
+                                    nodeIdStr?.toIntOrNull() == toNodeId
+                                }
+                                
+                                if (toNode != null) {
+                                    val geometry = toNode.geometry()
+                                    if (geometry is Point) {
+                                        val indicator = Feature.fromGeometry(geometry)
+                                        indicator.addStringProperty("text", "This floor")
+                                        indicator.addStringProperty("type", "destination")
+                                        transitionFeatures.add(indicator)
+                                        
+                                        Log.d(TAG, "  ✅ Creating 'This floor' indicator at node $toNodeId (destination)")
                                     }
                                 }
                             }
@@ -1895,15 +1863,10 @@ class MainActivity : AppCompatActivity() {
                 return
             }
             
-            // Remove existing layers and source
-            val backgroundLayerId = "${transitionIndicatorsLayerId}_background"
+            // Remove existing layer and source
             style.getLayer(transitionIndicatorsLayerId)?.let { 
                 style.removeLayer(transitionIndicatorsLayerId)
-                Log.d(TAG, "Removed existing transition indicators text layer")
-            }
-            style.getLayer(backgroundLayerId)?.let { 
-                style.removeLayer(backgroundLayerId)
-                Log.d(TAG, "Removed existing transition indicators background layer")
+                Log.d(TAG, "Removed existing transition indicators layer")
             }
             style.getSource(transitionIndicatorsSourceId)?.let { 
                 style.removeSource(transitionIndicatorsSourceId)
@@ -1915,32 +1878,24 @@ class MainActivity : AppCompatActivity() {
             val source = GeoJsonSource(transitionIndicatorsSourceId, featureCollection)
             style.addSource(source)
             
-            // Add white background circle layer first
-            val backgroundLayer = CircleLayer(backgroundLayerId, transitionIndicatorsSourceId)
-                .withProperties(
-                    circleRadius(18f), // Larger radius for background
-                    circleColor("#FFFFFF"), // White background
-                    circleOpacity(1.0f),
-                    circleStrokeColor("#000000"), // Black border for definition
-                    circleStrokeWidth(2f)
-                )
-            style.addLayer(backgroundLayer)
-            
-            // Add text layer on top of background with white text
+            // Add text layer with offset position and rectangular background
             val textLayer = org.maplibre.android.style.layers.SymbolLayer(transitionIndicatorsLayerId, transitionIndicatorsSourceId)
                 .withProperties(
                     PropertyFactory.textField(get("text")),
-                    PropertyFactory.textSize(18f),
+                    PropertyFactory.textSize(14f),
                     PropertyFactory.textColor("#FFFFFF"), // White text
-                    PropertyFactory.textHaloColor("#000000"), // Black halo for contrast against white background
-                    PropertyFactory.textHaloWidth(2f),
-                    PropertyFactory.textHaloBlur(1f),
-                    PropertyFactory.textOffset(arrayOf(0f, 0f)), // Center on circle
-                    PropertyFactory.textAnchor("center"),
+                    PropertyFactory.textHaloColor("#000000"), // Black outline
+                    PropertyFactory.textHaloWidth(1.5f),
+                    PropertyFactory.textHaloBlur(0.5f),
+                    PropertyFactory.textOffset(arrayOf(0f, -2.5f)), // Offset above node so it doesn't block
+                    PropertyFactory.textAnchor("bottom"),
                     PropertyFactory.textAllowOverlap(true), // Always show
                     PropertyFactory.textIgnorePlacement(true), // Ignore collision
                     PropertyFactory.iconAllowOverlap(true),
-                    PropertyFactory.textOptional(false) // Text is required
+                    PropertyFactory.textOptional(false), // Text is required
+                    // Rectangular background
+                    PropertyFactory.textOpacityTransition(null),
+                    PropertyFactory.textPadding(4f)
                 )
             style.addLayer(textLayer)
             
