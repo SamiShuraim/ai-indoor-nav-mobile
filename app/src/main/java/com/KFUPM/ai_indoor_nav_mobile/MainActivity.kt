@@ -507,9 +507,9 @@ class MainActivity : AppCompatActivity() {
             
             val allFeatures = mutableListOf<Feature>()
             
-            // Add POIs (red)
+            // Add POIs (blue with transparency)
             if (!poisGeoJSON.isNullOrBlank()) {
-                addGeoJSONLayer(style, poisGeoJSON, "poi", "#FF0000", 2f, allFeatures)
+                addGeoJSONLayer(style, poisGeoJSON, "poi", "#3B82F6", 2f, allFeatures)
             }
             
             // Add beacons (orange circles)
@@ -893,7 +893,7 @@ class MainActivity : AppCompatActivity() {
                 try {
                     if (style.getLayer(poiStrokeLayerId) == null) {
                         val strokeLayer = LineLayer(poiStrokeLayerId, poiSourceId).withProperties(
-                            lineColor("#FF0000"),
+                            lineColor("#2563EB"), // Darker blue for outline
                             lineWidth(2f)
                         )
                         style.addLayer(strokeLayer)
@@ -1112,16 +1112,16 @@ class MainActivity : AppCompatActivity() {
             val geoJsonSource = GeoJsonSource("poi-source", featureCollection)
             style.addSource(geoJsonSource)
             
-            // Add fill layer for polygon interiors with 0.6 opacity
+            // Add fill layer for polygon interiors with transparency
             val fillLayer = FillLayer("poi-fill-layer", "poi-source").withProperties(
-                fillColor("#FF0000"), // red
-                fillOpacity(0.6f)
+                fillColor("#3B82F6"), // Pleasant blue
+                fillOpacity(0.4f) // More transparent
             )
             style.addLayer(fillLayer)
             
             // Add line layer for polygon outlines
             val strokeLayer = LineLayer("poi-stroke-layer", "poi-source").withProperties(
-                lineColor("#FF0000"), // Red outline
+                lineColor("#2563EB"), // Darker blue outline
                 lineWidth(2f)
             )
             style.addLayer(strokeLayer)
@@ -1242,13 +1242,14 @@ class MainActivity : AppCompatActivity() {
                 
                 // Add fill layer for polygon interiors
                 val fillLayer = FillLayer("poi-fill-layer", "poi-source").withProperties(
-                    fillColor("#80FF0000") // red
+                    fillColor("#3B82F6"), // Pleasant blue
+                    fillOpacity(0.4f) // More transparent
                 )
                 style.addLayer(fillLayer)
                 
                 // Add line layer for polygon outlines
                 val strokeLayer = LineLayer("poi-stroke-layer", "poi-source").withProperties(
-                    lineColor("#FF0000"), // Red outline
+                    lineColor("#2563EB"), // Darker blue outline
                     lineWidth(2f)
                 )
                 style.addLayer(strokeLayer)
