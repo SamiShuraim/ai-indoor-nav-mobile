@@ -24,6 +24,8 @@ class LocalizationController(private val context: Context) {
     private var transitionModel: TransitionModel? = null
     private var hmmEngine: HmmEngine? = null
     private val configProvider = ConfigProvider(context)
+    private var backgroundMapper: BackgroundBeaconMapper? = null
+    private var beaconNameMapper: BeaconNameMapper? = null
     
     // Configuration
     private var config: LocalizationConfig = LocalizationConfig(version = "default")
@@ -63,7 +65,7 @@ class LocalizationController(private val context: Context) {
                 Log.d(TAG, "Auto-initializing localization...")
                 
                 // Create beacon name mapper for automatic MAC address detection
-                val beaconNameMapper = BeaconNameMapper(context)
+                beaconNameMapper = BeaconNameMapper(context)
                 val autoInit = AutoInitializer(context, configProvider, beaconNameMapper)
                 val result = autoInit.autoInitialize(availableFloorIds, scanDurationMs)
                 
@@ -112,6 +114,9 @@ class LocalizationController(private val context: Context) {
                 
                 imuTracker = ImuTracker(context)
                 
+                // Start background mapping for any unmapped beacons
+                startBackgroundMapping(result.floorId)
+                
                 Log.d(TAG, "Auto-initialization successful!")
                 Log.d(TAG, "Floor: ${result.floorId}, Initial node: ${result.initialNodeId}, Confidence: ${String.format("%.2f", result.confidence)}")
                 
@@ -138,7 +143,7 @@ class LocalizationController(private val context: Context) {
                 }
                 
                 // Create beacon name mapper for automatic MAC address detection
-                val beaconNameMapper = BeaconNameMapper(context)
+                beaconNameMapper = BeaconNameMapper(context)
                 
                 // Fetch beacons with name mapping support
                 val beacons = configProvider.fetchBeacons(floorId, beaconNameMapper)
@@ -191,6 +196,9 @@ class LocalizationController(private val context: Context) {
                 beaconScanner?.setKnownBeaconIds(beacons.map { it.id }.toSet())
                 
                 imuTracker = ImuTracker(context)
+                
+                // Start background mapping for any unmapped beacons
+                startBackgroundMapping(floorId)
                 
                 Log.d(TAG, "Localization initialized successfully")
                 Log.d(TAG, "Graph: ${graph.nodes.size} nodes, ${graph.edges.size} edges")
@@ -447,10 +455,118 @@ class LocalizationController(private val context: Context) {
     }
     
     /**
+     * Start background mapping for unmapped beacons
+     */
+    private fun startBackgroundMapping(floorId: Int) {
+        scope.launch {
+            try {
+                // Fetch all beacon names for this floor
+                val beaconNames = configProvider.fetchBeaconNames(floorId)
+                if (beaconNames.isNullOrEmpty()) {
+                    Log.d(TAG, "No beacon names to map")
+                    return@launch
+                }
+                
+                // Check if all beacons are already mapped
+                if (beaconNameMapper?.areAllMapped(beaconNames) == true) {
+                    Log.d(TAG, "All beacons already mapped, no background mapping needed")
+                    return@launch
+                }
+                
+                // Start background mapper
+                backgroundMapper = BackgroundBeaconMapper(context)
+                backgroundMapper?.start(beaconNames) {
+                    // Callback when mapping is complete
+                    Log.d(TAG, "Background mapping complete! All beacons are now mapped.")
+                    
+                    // Optionally, refresh beacon list with newly mapped beacons
+                    scope.launch {
+                        refreshBeaconList(floorId)
+                    }
+                }
+                
+                Log.d(TAG, "Background beacon mapping started")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error starting background mapping", e)
+            }
+        }
+    }
+    
+    /**
+     * Refresh beacon list when new mappings are discovered
+     */
+    private suspend fun refreshBeaconList(floorId: Int) {
+        withContext(Dispatchers.IO) {
+            try {
+                Log.d(TAG, "Refreshing beacon list with newly mapped beacons...")
+                
+                // Fetch updated beacons
+                val beacons = configProvider.fetchBeacons(floorId, beaconNameMapper)
+                if (beacons == null || beacons.isEmpty()) {
+                    Log.w(TAG, "Failed to refresh beacon list")
+                    return@withContext
+                }
+                
+                // Update observation model with new beacons
+                val wasRunning = isRunning
+                if (wasRunning) {
+                    stop()
+                }
+                
+                observationModel = ObservationModel(
+                    beacons = beacons,
+                    rankWeight = config.rankWeight,
+                    pairwiseWeight = config.pairwiseWeight,
+                    distanceRatioSlope = config.distanceRatioSlope
+                )
+                
+                // Update HMM engine
+                hmmEngine = HmmEngine(
+                    graphModel = graphModel!!,
+                    observationModel = observationModel!!,
+                    transitionModel = transitionModel!!,
+                    hysteresisK = config.hysteresisK,
+                    searchRadiusM = config.searchRadiusM
+                )
+                
+                // Restore HMM state
+                val currentNode = _localizationState.value.currentNodeId
+                hmmEngine?.initialize(currentNode)
+                
+                // Update beacon scanner with new beacon IDs
+                beaconScanner?.setKnownBeaconIds(beacons.map { it.id }.toSet())
+                
+                if (wasRunning) {
+                    start()
+                }
+                
+                Log.d(TAG, "Beacon list refreshed: ${beacons.size} beacons now available")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error refreshing beacon list", e)
+            }
+        }
+    }
+    
+    /**
+     * Get background mapper status
+     */
+    fun getBackgroundMapperStatus(): BackgroundBeaconMapper.MappingStatus? {
+        return backgroundMapper?.getStatus()
+    }
+    
+    /**
+     * Check if background mapping is complete
+     */
+    fun isBackgroundMappingComplete(): Boolean {
+        return backgroundMapper?.isComplete() ?: true
+    }
+    
+    /**
      * Clean up resources
      */
     fun cleanup() {
         stop()
+        backgroundMapper?.cleanup()
         beaconScanner?.cleanup()
         imuTracker?.cleanup()
         configProvider.cleanup()
