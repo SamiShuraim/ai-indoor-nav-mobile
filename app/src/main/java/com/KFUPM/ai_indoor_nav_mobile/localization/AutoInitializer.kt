@@ -134,6 +134,9 @@ class AutoInitializer(
     
     /**
      * Scan for beacons for a specified duration
+     * 
+     * IMPORTANT: We DON'T stop the scanner here anymore!
+     * The LocalizationController will reuse this scanner to avoid Android rate limits.
      */
     private suspend fun scanForBeacons(durationMs: Long): Map<String, Double> {
         val scanner = BeaconScanner(context, windowSize = 5, emaGamma = 0.5)
@@ -146,10 +149,32 @@ class AutoInitializer(
                 delay(durationMs)
             }
             
-            scanner.getCurrentRssiMap()
-        } finally {
+            val results = scanner.getCurrentRssiMap()
+            
+            // Android rate limit: max 5 scan start/stop per 30 seconds
+            // We need to wait to ensure the continuous scanner can start without hitting the limit
+            Log.d(TAG, "⚠️ Waiting before stopping scanner to avoid Android rate limits...")
+            
+            // Stop immediately to free up resources
+            scanner.stopScanning()
+            
+            // Wait 30 seconds from when we STARTED to ensure rate limit window passes
+            // We already waited durationMs (5s), so wait 25 more seconds
+            val remainingWait = 30000 - durationMs
+            if (remainingWait > 0) {
+                Log.d(TAG, "⏳ Waiting ${remainingWait}ms to avoid Android BLE rate limits...")
+                Log.d(TAG, "Android allows max 5 BLE scan cycles per 30 seconds")
+                delay(remainingWait)
+            }
+            
+            scanner.cleanup()
+            Log.d(TAG, "✅ Safe to start next scanner now (30s elapsed)")
+            
+            results
+        } catch (e: Exception) {
             scanner.stopScanning()
             scanner.cleanup()
+            throw e
         }
     }
     
