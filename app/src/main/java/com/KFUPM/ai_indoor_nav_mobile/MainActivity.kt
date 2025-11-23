@@ -85,6 +85,7 @@ class MainActivity : AppCompatActivity() {
     private var hasAutoClickedAssignment = false // Track if we've auto-clicked the assignment button once
     private var hasNavigatedToAssignedLevel = false // Track if we've navigated to the assigned level
     private var hasInitializedMultiFloorLocalization = false // Track if we've done initial multi-floor localization
+    private var allowAutoFloorSwitch = true // Allow auto-switching only initially and when navigation starts
     
     // Mapping of node ID to floor ID for automatic floor switching
     private val nodeToFloorMap = mutableMapOf<String, Int>()
@@ -1454,6 +1455,11 @@ class MainActivity : AppCompatActivity() {
             targetNavigationLevel = targetLevel
             visitedPathNodeIds.clear()
             
+            // Re-enable auto-switching when navigation starts
+            // This will switch to user's current floor to begin navigation
+            allowAutoFloorSwitch = true
+            Log.d(TAG, "Navigation started - enabling auto-switch to current floor")
+            
             // Redraw with filtering for current floor
             redrawPathWithProgress()
             
@@ -2060,35 +2066,37 @@ class MainActivity : AppCompatActivity() {
                             
                             val currentFloorId = currentFloor?.id
                             
-                            // Auto-switch floor if user is on different floor than currently displayed
-                            // This happens in three cases:
-                            // 1. Initial trilateration (currentFloor is null)
-                            // 2. User manually switched to view a different floor
-                            // 3. User physically moved to a different floor during navigation
-                            if (currentFloorId == null || detectedFloorId != currentFloorId) {
-                                Log.d(TAG, "Floor switch needed: current view=$currentFloorId, detected=$detectedFloorId")
+                            // Auto-switch floor ONLY if allowed (initial detection or navigation start)
+                            // After that, user has full control to view any floor they want
+                            if (allowAutoFloorSwitch && (currentFloorId == null || detectedFloorId != currentFloorId)) {
+                                Log.d(TAG, "Auto-switching to detected floor: current view=$currentFloorId, detected=$detectedFloorId")
                                 
                                 // Find the floor to switch to
                                 val targetFloor = floors.find { it.id == detectedFloorId }
                                 if (targetFloor != null) {
-                                    val isNavigating = currentNavigationPath != null
                                     val isInitial = currentFloorId == null
+                                    val isNavigating = currentNavigationPath != null
                                     Log.d(TAG, "Auto-switching to floor: ${targetFloor.name} (initial: $isInitial, navigating: $isNavigating)")
                                     withContext(Dispatchers.Main) {
                                         // Switch to the detected floor
                                         onFloorSelected(targetFloor)
                                         
                                         // Show toast message
-                                        val message = when {
-                                            isInitial -> "📍 Located on ${targetFloor.name}"
-                                            isNavigating -> "📍 You're now on ${targetFloor.name}"
-                                            else -> "📍 Switched to ${targetFloor.name}"
+                                        val message = if (isNavigating) {
+                                            "📍 Navigation starting on ${targetFloor.name}"
+                                        } else {
+                                            "📍 Located on ${targetFloor.name}"
                                         }
                                         Toast.makeText(
                                             this@MainActivity, 
                                             message, 
                                             Toast.LENGTH_SHORT
                                         ).show()
+                                        
+                                        // After switching, disable auto-switching
+                                        // User can now freely view any floor without interruption
+                                        allowAutoFloorSwitch = false
+                                        Log.d(TAG, "Floor set to ${targetFloor.name} - disabling auto-switch. User now has full control.")
                                     }
                                 }
                             }
