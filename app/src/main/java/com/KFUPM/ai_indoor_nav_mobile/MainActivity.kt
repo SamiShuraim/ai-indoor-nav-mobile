@@ -1504,8 +1504,9 @@ class MainActivity : AppCompatActivity() {
             style.getLayer(pastPathNodesLayerId)?.let { style.removeLayer(pastPathNodesLayerId) }
             style.getLayer(pastPathEdgesLayerId)?.let { style.removeLayer(pastPathEdgesLayerId) }
             
-            // Remove transition indicators
+            // Remove transition indicators (both text and background layers)
             style.getLayer(transitionIndicatorsLayerId)?.let { style.removeLayer(transitionIndicatorsLayerId) }
+            style.getLayer("${transitionIndicatorsLayerId}_background")?.let { style.removeLayer("${transitionIndicatorsLayerId}_background") }
             
             // Remove sources
             style.getSource(pathNodesSourceId)?.let { style.removeSource(pathNodesSourceId) }
@@ -1838,10 +1839,15 @@ class MainActivity : AppCompatActivity() {
                 return
             }
             
-            // Remove existing layer and source
+            // Remove existing layers and source
+            val backgroundLayerId = "${transitionIndicatorsLayerId}_background"
             style.getLayer(transitionIndicatorsLayerId)?.let { 
                 style.removeLayer(transitionIndicatorsLayerId)
-                Log.d(TAG, "Removed existing transition indicators layer")
+                Log.d(TAG, "Removed existing transition indicators text layer")
+            }
+            style.getLayer(backgroundLayerId)?.let { 
+                style.removeLayer(backgroundLayerId)
+                Log.d(TAG, "Removed existing transition indicators background layer")
             }
             style.getSource(transitionIndicatorsSourceId)?.let { 
                 style.removeSource(transitionIndicatorsSourceId)
@@ -1853,17 +1859,29 @@ class MainActivity : AppCompatActivity() {
             val source = GeoJsonSource(transitionIndicatorsSourceId, featureCollection)
             style.addSource(source)
             
-            // Add symbol layer for text with high visibility
+            // Add white background circle layer first
+            val backgroundLayerId = "${transitionIndicatorsLayerId}_background"
+            val backgroundLayer = CircleLayer(backgroundLayerId, transitionIndicatorsSourceId)
+                .withProperties(
+                    circleRadius(18f), // Larger radius for background
+                    circleColor("#FFFFFF"), // White background
+                    circleOpacity(1.0f),
+                    circleStrokeColor("#000000"), // Black border for definition
+                    circleStrokeWidth(2f)
+                )
+            style.addLayer(backgroundLayer)
+            
+            // Add text layer on top of background with white text
             val textLayer = org.maplibre.android.style.layers.SymbolLayer(transitionIndicatorsLayerId, transitionIndicatorsSourceId)
                 .withProperties(
                     PropertyFactory.textField(get("text")),
-                    PropertyFactory.textSize(20f), // Larger text
-                    PropertyFactory.textColor("#FFFFFF"),
-                    PropertyFactory.textHaloColor("#FF0000"), // Red halo for high visibility
-                    PropertyFactory.textHaloWidth(3f), // Thicker halo
+                    PropertyFactory.textSize(18f),
+                    PropertyFactory.textColor("#FFFFFF"), // White text
+                    PropertyFactory.textHaloColor("#000000"), // Black halo for contrast against white background
+                    PropertyFactory.textHaloWidth(2f),
                     PropertyFactory.textHaloBlur(1f),
-                    PropertyFactory.textOffset(arrayOf(0f, -2.5f)),
-                    PropertyFactory.textAnchor("bottom"),
+                    PropertyFactory.textOffset(arrayOf(0f, 0f)), // Center on circle
+                    PropertyFactory.textAnchor("center"),
                     PropertyFactory.textAllowOverlap(true), // Always show
                     PropertyFactory.textIgnorePlacement(true), // Ignore collision
                     PropertyFactory.iconAllowOverlap(true),
