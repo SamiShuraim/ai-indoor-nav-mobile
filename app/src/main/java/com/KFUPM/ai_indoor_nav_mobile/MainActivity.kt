@@ -345,8 +345,8 @@ class MainActivity : AppCompatActivity() {
                 return
             }
             
-            floors = buildingFloors.sortedBy { it.floorNumber }
-            Log.d(TAG, "Found ${floors.size} floors: ${floors.map { "id=${it.id}, num=${it.floorNumber}, name=${it.name}" }}")
+            floors = buildingFloors.sortedByDescending { it.floorNumber }
+            Log.d(TAG, "Found ${floors.size} floors (sorted highest first): ${floors.map { "id=${it.id}, num=${it.floorNumber}, name=${it.name}" }}")
             
             // Update floor selector
             floorSelectorAdapter.updateFloors(floors)
@@ -1708,72 +1708,58 @@ class MainActivity : AppCompatActivity() {
                 Log.d(TAG, "🔍 Looking for floor transitions on floor $currentFloorId...")
                 val transitionFeatures = mutableListOf<Feature>()
                 
-                // Fetch node data for current floor if not cached
-                val routeNodes = apiService.getRouteNodesByFloor(currentFloorId)
-                if (routeNodes == null || routeNodes.isEmpty()) {
-                    Log.w(TAG, "No route nodes found for floor $currentFloorId")
-                    return@launch
-                }
-                
-                // Cache node types
-                routeNodes.forEach { node ->
-                    nodeTypeCache[node.id] = node.nodeType
-                    Log.d(TAG, "Node ${node.id}: type=${node.nodeType}")
-                }
-                
                 // Get all path nodes
                 val pathNodes = features.filter { it.getBooleanProperty("is_path_node") == true }
                 Log.d(TAG, "Found ${pathNodes.size} path nodes to check")
                 
-                // Find transition nodes (stairs/elevators) on current floor
+                // Find transition nodes on current floor (marked with is_level_transition)
                 pathNodes.forEach { feature ->
                     val nodeIdStr = feature.getStringProperty("id")
                     val nodeId = nodeIdStr?.toIntOrNull()
+                    val isLevelTransition = feature.getBooleanProperty("is_level_transition") ?: false
                     
-                    if (nodeId != null) {
+                    if (nodeId != null && isLevelTransition) {
                         val nodeFloorId = nodeToFloorMap[nodeId.toString()]
+                        
+                        Log.d(TAG, "Found level transition node: $nodeId (floor: $nodeFloorId, current: $currentFloorId)")
                         
                         // Only process nodes on current floor
                         if (nodeFloorId == currentFloorId) {
-                            val nodeType = nodeTypeCache[nodeId]
+                            // Get transition details from the feature
+                            val fromLevel = feature.getNumberProperty("transition_from_level")?.toInt()
+                            val toLevel = feature.getNumberProperty("transition_to_level")?.toInt()
                             
-                            Log.d(TAG, "Checking node $nodeId (type: $nodeType)")
+                            Log.d(TAG, "✅ Found transition node on current floor: $nodeId (from level $fromLevel to $toLevel)")
                             
-                            if (nodeType?.contains("stair", ignoreCase = true) == true || 
-                                nodeType?.contains("elevator", ignoreCase = true) == true) {
+                            // This is a transition node - find connected nodes on different floors
+                            val connectedFloors = findConnectedFloors(nodeId, features)
+                            
+                            if (connectedFloors.isNotEmpty()) {
+                                Log.d(TAG, "  Connected to ${connectedFloors.size} other floors")
                                 
-                                Log.d(TAG, "✅ Found transition node: $nodeId ($nodeType)")
-                                
-                                // This is a transition node - find connected nodes on different floors
-                                val connectedFloors = findConnectedFloors(nodeId, features)
-                                
-                                if (connectedFloors.isNotEmpty()) {
-                                    Log.d(TAG, "  Connected to ${connectedFloors.size} other floors")
-                                    
-                                    // Get the geometry from the feature
-                                    val geometry = feature.geometry()
-                                    if (geometry is Point) {
-                                        connectedFloors.forEach { (targetFloorId, direction) ->
-                                            // Get floor number
-                                            val targetFloor = floors.find { it.id == targetFloorId }
-                                            if (targetFloor != null) {
-                                                // Create indicator feature
-                                                val indicator = Feature.fromGeometry(geometry)
-                                                val text = "$direction F${targetFloor.floorNumber}"
-                                                indicator.addStringProperty("text", text)
-                                                indicator.addStringProperty("direction", direction)
-                                                indicator.addNumberProperty("targetFloor", targetFloor.floorNumber)
-                                                transitionFeatures.add(indicator)
-                                                
-                                                Log.d(TAG, "  📍 Creating indicator: '$text' at (${geometry.coordinates()[0]}, ${geometry.coordinates()[1]})")
-                                            }
+                                // Get the geometry from the feature
+                                val geometry = feature.geometry()
+                                if (geometry is Point) {
+                                    connectedFloors.forEach { (targetFloorId, direction) ->
+                                        // Get floor number
+                                        val targetFloor = floors.find { it.id == targetFloorId }
+                                        if (targetFloor != null) {
+                                            // Create indicator feature
+                                            val indicator = Feature.fromGeometry(geometry)
+                                            val text = "$direction F${targetFloor.floorNumber}"
+                                            indicator.addStringProperty("text", text)
+                                            indicator.addStringProperty("direction", direction)
+                                            indicator.addNumberProperty("targetFloor", targetFloor.floorNumber)
+                                            transitionFeatures.add(indicator)
+                                            
+                                            Log.d(TAG, "  📍 Creating indicator: '$text' at (${geometry.coordinates()[0]}, ${geometry.coordinates()[1]})")
                                         }
-                                    } else {
-                                        Log.w(TAG, "  ⚠️ Node geometry is not a Point: ${geometry?.type()}")
                                     }
                                 } else {
-                                    Log.d(TAG, "  ⚠️ No connected floors found")
+                                    Log.w(TAG, "  ⚠️ Node geometry is not a Point: ${geometry?.type()}")
                                 }
+                            } else {
+                                Log.d(TAG, "  ⚠️ No connected floors found")
                             }
                         }
                     }
