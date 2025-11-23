@@ -1512,8 +1512,9 @@ class MainActivity : AppCompatActivity() {
             style.getLayer(pastPathNodesLayerId)?.let { style.removeLayer(pastPathNodesLayerId) }
             style.getLayer(pastPathEdgesLayerId)?.let { style.removeLayer(pastPathEdgesLayerId) }
             
-            // Remove transition indicators
+            // Remove transition indicators (text and background)
             style.getLayer(transitionIndicatorsLayerId)?.let { style.removeLayer(transitionIndicatorsLayerId) }
+            style.getLayer("${transitionIndicatorsLayerId}_bg")?.let { style.removeLayer("${transitionIndicatorsLayerId}_bg") }
             
             // Remove sources
             style.getSource(pathNodesSourceId)?.let { style.removeSource(pathNodesSourceId) }
@@ -1863,10 +1864,15 @@ class MainActivity : AppCompatActivity() {
                 return
             }
             
-            // Remove existing layer and source
+            // Remove existing layers and source
+            val backgroundLayerId = "${transitionIndicatorsLayerId}_bg"
             style.getLayer(transitionIndicatorsLayerId)?.let { 
                 style.removeLayer(transitionIndicatorsLayerId)
                 Log.d(TAG, "Removed existing transition indicators layer")
+            }
+            style.getLayer(backgroundLayerId)?.let { 
+                style.removeLayer(backgroundLayerId)
+                Log.d(TAG, "Removed existing transition indicators background layer")
             }
             style.getSource(transitionIndicatorsSourceId)?.let { 
                 style.removeSource(transitionIndicatorsSourceId)
@@ -1878,21 +1884,31 @@ class MainActivity : AppCompatActivity() {
             val source = GeoJsonSource(transitionIndicatorsSourceId, featureCollection)
             style.addSource(source)
             
-            // Add text layer with offset position
+            // Add background circle layer behind text (offset to match text position)
+            val backgroundLayerId = "${transitionIndicatorsLayerId}_bg"
+            val backgroundLayer = CircleLayer(backgroundLayerId, transitionIndicatorsSourceId)
+                .withProperties(
+                    circleRadius(20f),
+                    circleColor("#FFFFFF"), // White background
+                    circleOpacity(0.9f),
+                    circleStrokeColor("#000000"),
+                    circleStrokeWidth(2f),
+                    circleTranslate(arrayOf(0f, -20f)) // Offset to match text position
+                )
+            style.addLayer(backgroundLayer)
+            
+            // Add text layer on top with offset position
             val textLayer = org.maplibre.android.style.layers.SymbolLayer(transitionIndicatorsLayerId, transitionIndicatorsSourceId)
                 .withProperties(
                     PropertyFactory.textField(get("text")),
                     PropertyFactory.textSize(14f),
-                    PropertyFactory.textColor("#FFFFFF"), // White text
-                    PropertyFactory.textHaloColor("#000000"), // Black outline for high contrast
-                    PropertyFactory.textHaloWidth(2f),
-                    PropertyFactory.textHaloBlur(0.5f),
-                    PropertyFactory.textOffset(arrayOf(0f, -2.5f)), // Offset above node so it doesn't block
+                    PropertyFactory.textColor("#000000"), // Black text on white background
+                    PropertyFactory.textOffset(arrayOf(0f, -2.5f)), // Offset above node
                     PropertyFactory.textAnchor("bottom"),
-                    PropertyFactory.textAllowOverlap(true), // Always show
-                    PropertyFactory.textIgnorePlacement(true), // Ignore collision
+                    PropertyFactory.textAllowOverlap(true),
+                    PropertyFactory.textIgnorePlacement(true),
                     PropertyFactory.iconAllowOverlap(true),
-                    PropertyFactory.textOptional(false) // Text is required
+                    PropertyFactory.textOptional(false)
                 )
             style.addLayer(textLayer)
             
