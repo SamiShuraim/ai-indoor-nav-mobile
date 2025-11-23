@@ -35,6 +35,11 @@ class LocalizationController(private val context: Context) {
     // Floor detection (beacon-based, like AutoInitializer)
     private var floorBeaconsCache: Map<Int, List<LocalizationBeacon>> = emptyMap()
     
+    // Rate limiting for floor detection to avoid Android BLE scan limits
+    private var lastFloorDetectionTime = 0L
+    private var lastDetectedFloor: Int? = null
+    private val floorDetectionIntervalMs = 2000L  // Check floor every 2 seconds max
+    
     // State
     private val _localizationState = MutableStateFlow<LocalizationState>(
         LocalizationState(
@@ -461,10 +466,21 @@ class LocalizationController(private val context: Context) {
     /**
      * Determine current floor using BEACON MATCHING (same logic as AutoInitializer)
      * This is the method that WORKS at startup - now we use it continuously
+     * 
+     * RATE LIMITED: Only checks floor every 2 seconds to avoid Android BLE scan limits
      */
     fun detectFloorFromBeacons(): Int? {
-        val rssiMap = beaconScanner?.getCurrentRssiMap() ?: return null
-        if (rssiMap.isEmpty()) return null
+        val currentTime = System.currentTimeMillis()
+        
+        // Rate limit: Only detect floor every 2 seconds
+        if (currentTime - lastFloorDetectionTime < floorDetectionIntervalMs) {
+            return lastDetectedFloor  // Return cached result
+        }
+        
+        lastFloorDetectionTime = currentTime
+        
+        val rssiMap = beaconScanner?.getCurrentRssiMap() ?: return lastDetectedFloor
+        if (rssiMap.isEmpty()) return lastDetectedFloor
         
         val visibleBeaconIds = rssiMap.keys
         val floorScores = mutableMapOf<Int, Double>()
@@ -498,6 +514,8 @@ class LocalizationController(private val context: Context) {
         
         // Return floor with highest score
         val detectedFloor = floorScores.maxByOrNull { it.value }?.key
+        lastDetectedFloor = detectedFloor  // Cache result
+        
         Log.d(TAG, "🎯 BEACON-BASED DETECTION: Floor $detectedFloor (visible beacons: ${visibleBeaconIds.size})")
         return detectedFloor
     }

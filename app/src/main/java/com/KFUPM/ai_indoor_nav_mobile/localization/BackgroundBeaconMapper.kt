@@ -38,8 +38,10 @@ class BackgroundBeaconMapper(private val context: Context) {
     // Currently discovered beacons (in this session)
     private val discoveredInSession = ConcurrentHashMap<String, String>()
     
-    // Scan interval (once every 2 seconds)
-    private val scanIntervalMs = 2000L
+    // Scan interval - Android limits scan start/stop to max 5 times per 30 seconds
+    // So we need at least 6 seconds between scans (30s / 5 = 6s)
+    // Using 10 seconds to be safe
+    private val scanIntervalMs = 10000L
     
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
@@ -158,12 +160,12 @@ class BackgroundBeaconMapper(private val context: Context) {
                     performSingleScan()
                     scanCount++
                     
-                    // Log progress every 10 scans (every 10 seconds)
-                    if (scanCount % 10 == 0) {
+                    // Log progress every 6 scans (every minute)
+                    if (scanCount % 6 == 0) {
                         logProgress()
                     }
                     
-                    // Wait 1 second before next scan
+                    // Wait before next scan (Android requires 6+ seconds to avoid rate limiting)
                     delay(scanIntervalMs)
                 } catch (e: Exception) {
                     Log.e(TAG, "Error in periodic scanning", e)
@@ -171,7 +173,7 @@ class BackgroundBeaconMapper(private val context: Context) {
                 }
             }
         }
-        Log.d(TAG, "Periodic background scanning started (once every 2 seconds)")
+        Log.d(TAG, "Periodic background scanning started (once every ${scanIntervalMs/1000} seconds)")
     }
     
     /**
@@ -185,8 +187,8 @@ class BackgroundBeaconMapper(private val context: Context) {
             
             bluetoothLeScanner?.startScan(null, settings, scanCallback)
             
-            // Scan for 500ms, then stop
-            delay(500)
+            // Scan for 2 seconds (longer scan = more beacons discovered)
+            delay(2000)
             
             bluetoothLeScanner?.stopScan(scanCallback)
         } catch (e: SecurityException) {
