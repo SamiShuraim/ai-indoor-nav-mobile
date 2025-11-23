@@ -1962,21 +1962,33 @@ class MainActivity : AppCompatActivity() {
                                 floorSelectorAdapter.setUserCurrentFloor(detectedFloorId)
                             }
                             
-                            // Auto-switch ONLY if user is navigating AND is on wrong floor display
                             val currentFloorId = currentFloor?.id
-                            if (currentNavigationPath != null && currentFloorId != null && detectedFloorId != currentFloorId) {
+                            
+                            // Auto-switch floor if user is on different floor than currently displayed
+                            // This happens in two cases:
+                            // 1. Initial trilateration (to show user's actual starting floor)
+                            // 2. During navigation when user moves to a different floor
+                            if (currentFloorId != null && detectedFloorId != currentFloorId) {
                                 Log.d(TAG, "User physically on different floor: current view=$currentFloorId, actual=$detectedFloorId")
                                 
                                 // Find the floor to switch to
                                 val targetFloor = floors.find { it.id == detectedFloorId }
                                 if (targetFloor != null) {
-                                    Log.d(TAG, "Auto-switching to floor: ${targetFloor.name}")
+                                    val isNavigating = currentNavigationPath != null
+                                    Log.d(TAG, "Auto-switching to floor: ${targetFloor.name} (navigating: $isNavigating)")
                                     withContext(Dispatchers.Main) {
-                                        // Simulate floor button click
+                                        // Switch to the detected floor
                                         onFloorSelected(targetFloor)
+                                        
+                                        // Show toast message
+                                        val message = if (isNavigating) {
+                                            "📍 You're now on ${targetFloor.name}"
+                                        } else {
+                                            "📍 Located on ${targetFloor.name}"
+                                        }
                                         Toast.makeText(
                                             this@MainActivity, 
-                                            "📍 You're now on ${targetFloor.name}", 
+                                            message, 
                                             Toast.LENGTH_SHORT
                                         ).show()
                                     }
