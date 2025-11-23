@@ -3,6 +3,7 @@ package com.KFUPM.ai_indoor_nav_mobile
 import android.Manifest
 import android.app.Activity
 import android.app.Dialog
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -74,6 +75,7 @@ class MainActivity : AppCompatActivity() {
 
     private val apiService = ApiService()
     private lateinit var localizationController: LocalizationController
+    private lateinit var cacheManager: CacheManager
     private var isLocalizationActive = false
 
     // Visitor ID for QR code
@@ -83,6 +85,8 @@ class MainActivity : AppCompatActivity() {
     private var hasRequestedInitialAssignment = false
     private var hasAutoClickedAssignment = false // Track if we've auto-clicked the assignment button once
     private var hasNavigatedToAssignedLevel = false // Track if we've navigated to the assigned level
+    private var hasInitializedMultiFloorLocalization = false // Track if we've done initial multi-floor localization
+    private var lastDetectedFloorId: Int? = null // Track user's last physically detected floor
     
     // Mapping of node ID to floor ID for automatic floor switching
     private val nodeToFloorMap = mutableMapOf<String, Int>()
@@ -182,12 +186,16 @@ class MainActivity : AppCompatActivity() {
         assignmentInfoText = findViewById(R.id.assignmentInfoText)
         btnRetryApi = findViewById(R.id.btnRetryApi)
 
-        // Initialize localization controller
+        // Initialize localization controller and cache manager
         localizationController = LocalizationController(this)
+        cacheManager = CacheManager(this)
 
         setupFloorSelector()
         mapView.onCreate(savedInstanceState)
         setupButtonListeners()
+        
+        // Request battery optimization exemption for unrestricted Bluetooth scanning
+        requestBatteryOptimizationExemption()
 
         Log.d(TAG, "tileUrl: ${BuildConfig.tileUrl}")
 
@@ -247,7 +255,11 @@ class MainActivity : AppCompatActivity() {
     private fun initializeAppData() {
         lifecycleScope.launch {
             try {
-                Log.d(TAG, "Fetching buildings...")
+                Log.d(TAG, "Initializing app data...")
+                
+                // TODO: Caching disabled - waiting for backend versioning endpoint
+                // Will re-enable once backend provides data version checking
+                Log.d(TAG, "📡 Fetching fresh data from API")
                 val buildings = apiService.getBuildings()
                 
                 if (buildings.isNullOrEmpty()) {
@@ -265,6 +277,9 @@ class MainActivity : AppCompatActivity() {
                 
                 // Load node-to-floor mappings for all floors to enable automatic floor switching
                 loadNodeToFloorMappings()
+                
+                // Load beacons from all floors for initial trilateration
+                loadAllBeaconsForTrilateration()
                 
             } catch (e: Exception) {
                 Log.e(TAG, "Error initializing app data", e)
@@ -299,6 +314,39 @@ class MainActivity : AppCompatActivity() {
             Log.d(TAG, "Loaded ${nodeToFloorMap.size} node-to-floor mappings across ${floors.size} floors")
         } catch (e: Exception) {
             Log.e(TAG, "Error loading node-to-floor mappings", e)
+        }
+    }
+    
+    /**
+     * Load beacons from all floors for initial trilateration
+     * This allows the system to determine which floor the user is on at startup
+     */
+    private suspend fun loadAllBeaconsForTrilateration() {
+        try {
+            Log.d(TAG, "Loading beacons from all floors for trilateration...")
+            
+            // Load beacons for each floor in parallel
+            val allBeacons = coroutineScope {
+                floors.map { floor ->
+                    async { 
+                        apiService.getBeaconsByFloor(floor.id)?.also { beacons ->
+                            Log.d(TAG, "Loaded ${beacons.size} beacons for floor ${floor.name}")
+                        }
+                    }
+                }.awaitAll().filterNotNull().flatten()
+            }
+            
+            Log.d(TAG, "Loaded ${allBeacons.size} total beacons across ${floors.size} floors")
+            
+            // Now initialize localization with ALL floor IDs so it can figure out which floor user is on
+            if (floors.isNotEmpty()) {
+                val allFloorIds = floors.map { it.id }
+                Log.d(TAG, "Initializing localization with all floor IDs: $allFloorIds")
+                initializeLocalizationWithAllFloors(allFloorIds)
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading beacons for trilateration", e)
         }
     }
 
@@ -345,20 +393,17 @@ class MainActivity : AppCompatActivity() {
                 return
             }
             
-            floors = buildingFloors.sortedBy { it.floorNumber }
-            Log.d(TAG, "Found ${floors.size} floors: ${floors.map { "id=${it.id}, num=${it.floorNumber}, name=${it.name}" }}")
+            floors = buildingFloors.sortedByDescending { it.floorNumber }
+            Log.d(TAG, "Found ${floors.size} floors (sorted highest first): ${floors.map { "id=${it.id}, num=${it.floorNumber}, name=${it.name}" }}")
+            
             
             // Update floor selector
             floorSelectorAdapter.updateFloors(floors)
             floorSelectorContainer.visibility = View.VISIBLE
             
-            // Select the first floor
-            if (floors.isNotEmpty()) {
-                Log.d(TAG, "Selecting first floor: ${floors.first().name}")
-                selectFloor(floors.first())
-            } else {
-                Log.e(TAG, "No floors to select!")
-            }
+            // Don't select any floor initially at startup
+            // Let trilateration determine the user's floor first, then auto-switch
+            Log.d(TAG, "Floors loaded. Waiting for trilateration to determine user's floor...")
             
         } catch (e: Exception) {
             Log.e(TAG, "Error fetching floors", e)
@@ -379,12 +424,13 @@ class MainActivity : AppCompatActivity() {
      */
     private fun selectFloor(floor: Floor) {
         Log.d(TAG, "selectFloor called: id=${floor.id}, number=${floor.floorNumber}, name=${floor.name}")
+        
+        // Clear any existing blue dot from previous floor
+        clearLocalizationMarker()
+        
         currentFloor = floor
         floorSelectorAdapter.setSelectedFloor(floor.id)
         Log.d(TAG, "currentFloor set to: id=${currentFloor?.id}, number=${currentFloor?.floorNumber}, name=${currentFloor?.name}")
-        
-        // Reset assignment flag when changing floors
-        hasRequestedInitialAssignment = false
 
         // Redraw path if navigation is active (after floor data loads)
         lifecycleScope.launch {
@@ -419,7 +465,12 @@ class MainActivity : AppCompatActivity() {
                 updateMapDisplayWithGeoJSON(poisGeoJSON, beaconsGeoJSON, routeNodesGeoJSON)
                 
                 // Initialize localization for this floor
-                initializeLocalization(floor.id)
+                // Skip if we've already done multi-floor initialization at startup
+                if (!hasInitializedMultiFloorLocalization) {
+                    initializeLocalization(floor.id)
+                } else {
+                    Log.d(TAG, "Skipping per-floor localization - already initialized with all floors")
+                }
                 
                 // Redraw navigation path for the new floor if navigation is active
                 if (currentNavigationPath != null) {
@@ -463,9 +514,9 @@ class MainActivity : AppCompatActivity() {
             
             val allFeatures = mutableListOf<Feature>()
             
-            // Add POIs (red)
+            // Add POIs (green with transparency)
             if (!poisGeoJSON.isNullOrBlank()) {
-                addGeoJSONLayer(style, poisGeoJSON, "poi", "#FF0000", 2f, allFeatures)
+                addGeoJSONLayer(style, poisGeoJSON, "poi", "#10B981", 2f, allFeatures)
             }
             
             // Add beacons (orange circles)
@@ -849,7 +900,7 @@ class MainActivity : AppCompatActivity() {
                 try {
                     if (style.getLayer(poiStrokeLayerId) == null) {
                         val strokeLayer = LineLayer(poiStrokeLayerId, poiSourceId).withProperties(
-                            lineColor("#FF0000"),
+                            lineColor("#059669"), // Darker green for outline
                             lineWidth(2f)
                         )
                         style.addLayer(strokeLayer)
@@ -1068,16 +1119,16 @@ class MainActivity : AppCompatActivity() {
             val geoJsonSource = GeoJsonSource("poi-source", featureCollection)
             style.addSource(geoJsonSource)
             
-            // Add fill layer for polygon interiors with 0.6 opacity
+            // Add fill layer for polygon interiors with transparency
             val fillLayer = FillLayer("poi-fill-layer", "poi-source").withProperties(
-                fillColor("#FF0000"), // red
-                fillOpacity(0.6f)
+                fillColor("#10B981"), // Pleasant green
+                fillOpacity(0.4f) // More transparent
             )
             style.addLayer(fillLayer)
             
             // Add line layer for polygon outlines
             val strokeLayer = LineLayer("poi-stroke-layer", "poi-source").withProperties(
-                lineColor("#FF0000"), // Red outline
+                lineColor("#059669"), // Darker green outline
                 lineWidth(2f)
             )
             style.addLayer(strokeLayer)
@@ -1198,13 +1249,14 @@ class MainActivity : AppCompatActivity() {
                 
                 // Add fill layer for polygon interiors
                 val fillLayer = FillLayer("poi-fill-layer", "poi-source").withProperties(
-                    fillColor("#80FF0000") // red
+                    fillColor("#10B981"), // Pleasant green
+                    fillOpacity(0.4f) // More transparent
                 )
                 style.addLayer(fillLayer)
                 
                 // Add line layer for polygon outlines
                 val strokeLayer = LineLayer("poi-stroke-layer", "poi-source").withProperties(
-                    lineColor("#FF0000"), // Red outline
+                    lineColor("#059669"), // Darker green outline
                     lineWidth(2f)
                 )
                 style.addLayer(strokeLayer)
@@ -1408,6 +1460,19 @@ class MainActivity : AppCompatActivity() {
             targetNavigationLevel = targetLevel
             visitedPathNodeIds.clear()
             
+            // When navigation starts, switch to user's current floor
+            val currentNodeId = localizationController.localizationState.value.currentNodeId
+            if (currentNodeId != null) {
+                val detectedFloorId = nodeToFloorMap[currentNodeId]
+                if (detectedFloorId != null) {
+                    val targetFloor = floors.find { it.id == detectedFloorId }
+                    if (targetFloor != null && currentFloor?.id != detectedFloorId) {
+                        Log.d(TAG, "Navigation starting - switching to user's current floor: ${targetFloor.name}")
+                        onFloorSelected(targetFloor)
+                    }
+                }
+            }
+            
             // Redraw with filtering for current floor
             redrawPathWithProgress()
             
@@ -1455,8 +1520,9 @@ class MainActivity : AppCompatActivity() {
             style.getLayer(pastPathNodesLayerId)?.let { style.removeLayer(pastPathNodesLayerId) }
             style.getLayer(pastPathEdgesLayerId)?.let { style.removeLayer(pastPathEdgesLayerId) }
             
-            // Remove transition indicators
+            // Remove transition indicators (text and background)
             style.getLayer(transitionIndicatorsLayerId)?.let { style.removeLayer(transitionIndicatorsLayerId) }
+            style.getLayer("${transitionIndicatorsLayerId}_bg")?.let { style.removeLayer("${transitionIndicatorsLayerId}_bg") }
             
             // Remove sources
             style.getSource(pathNodesSourceId)?.let { style.removeSource(pathNodesSourceId) }
@@ -1691,16 +1757,17 @@ class MainActivity : AppCompatActivity() {
 
             Log.d(TAG, "Path redrawn for floor ${currentFloor?.name}: ${pastNodes.size} visited nodes, ${futureNodes.size} remaining nodes on this floor")
 
+            // Add floor transition indicators after path is drawn
+            addFloorTransitionIndicators(style, features, currentFloorId)
+
         } catch (e: Exception) {
             Log.e(TAG, "Error redrawing path with progress", e)
         }
-        
-        // Add floor transition indicators after path is drawn
-        addFloorTransitionIndicators(style, features, currentFloorId)
     }
 
     /**
      * Add floor transition indicators next to stairs/elevators
+     * Shows indicators at the starting point of floor transitions
      */
     private fun addFloorTransitionIndicators(style: Style, features: List<Feature>, currentFloorId: Int) {
         lifecycleScope.launch {
@@ -1708,71 +1775,71 @@ class MainActivity : AppCompatActivity() {
                 Log.d(TAG, "🔍 Looking for floor transitions on floor $currentFloorId...")
                 val transitionFeatures = mutableListOf<Feature>()
                 
-                // Fetch node data for current floor if not cached
-                val routeNodes = apiService.getRouteNodesByFloor(currentFloorId)
-                if (routeNodes == null || routeNodes.isEmpty()) {
-                    Log.w(TAG, "No route nodes found for floor $currentFloorId")
-                    return@launch
-                }
-                
-                // Cache node types
-                routeNodes.forEach { node ->
-                    nodeTypeCache[node.id] = node.nodeType
-                    Log.d(TAG, "Node ${node.id}: type=${node.nodeType}")
-                }
-                
-                // Get all path nodes
+                // Get all path edges to find floor transitions
+                val pathEdges = features.filter { it.getBooleanProperty("is_path_edge") == true }
                 val pathNodes = features.filter { it.getBooleanProperty("is_path_node") == true }
-                Log.d(TAG, "Found ${pathNodes.size} path nodes to check")
                 
-                // Find transition nodes (stairs/elevators) on current floor
-                pathNodes.forEach { feature ->
-                    val nodeIdStr = feature.getStringProperty("id")
-                    val nodeId = nodeIdStr?.toIntOrNull()
+                Log.d(TAG, "Found ${pathEdges.size} path edges and ${pathNodes.size} path nodes to check")
+                
+                // Find edges that transition between floors
+                pathEdges.forEach { edge ->
+                    val fromNodeId = edge.getNumberProperty("from_node_id")?.toInt()
+                    val toNodeId = edge.getNumberProperty("to_node_id")?.toInt()
+                    val isLevelTransition = edge.getBooleanProperty("is_level_transition") ?: false
                     
-                    if (nodeId != null) {
-                        val nodeFloorId = nodeToFloorMap[nodeId.toString()]
+                    if (fromNodeId != null && toNodeId != null) {
+                        val fromFloorId = nodeToFloorMap[fromNodeId.toString()]
+                        val toFloorId = nodeToFloorMap[toNodeId.toString()]
                         
-                        // Only process nodes on current floor
-                        if (nodeFloorId == currentFloorId) {
-                            val nodeType = nodeTypeCache[nodeId]
+                        // Check if this edge transitions between floors
+                        if (fromFloorId != toFloorId && fromFloorId != null && toFloorId != null) {
+                            Log.d(TAG, "Found floor transition edge: $fromNodeId (floor $fromFloorId) -> $toNodeId (floor $toFloorId)")
                             
-                            Log.d(TAG, "Checking node $nodeId (type: $nodeType)")
-                            
-                            if (nodeType?.contains("stair", ignoreCase = true) == true || 
-                                nodeType?.contains("elevator", ignoreCase = true) == true) {
+                            // Show "Go up/down" indicator on FROM floor
+                            if (fromFloorId == currentFloorId) {
+                                val fromNode = pathNodes.find { 
+                                    val nodeIdStr = it.getStringProperty("id")
+                                    nodeIdStr?.toIntOrNull() == fromNodeId
+                                }
                                 
-                                Log.d(TAG, "✅ Found transition node: $nodeId ($nodeType)")
-                                
-                                // This is a transition node - find connected nodes on different floors
-                                val connectedFloors = findConnectedFloors(nodeId, features)
-                                
-                                if (connectedFloors.isNotEmpty()) {
-                                    Log.d(TAG, "  Connected to ${connectedFloors.size} other floors")
-                                    
-                                    // Get the geometry from the feature
-                                    val geometry = feature.geometry()
+                                if (fromNode != null) {
+                                    val geometry = fromNode.geometry()
                                     if (geometry is Point) {
-                                        connectedFloors.forEach { (targetFloorId, direction) ->
-                                            // Get floor number
-                                            val targetFloor = floors.find { it.id == targetFloorId }
-                                            if (targetFloor != null) {
-                                                // Create indicator feature
-                                                val indicator = Feature.fromGeometry(geometry)
-                                                val text = "$direction F${targetFloor.floorNumber}"
-                                                indicator.addStringProperty("text", text)
-                                                indicator.addStringProperty("direction", direction)
-                                                indicator.addNumberProperty("targetFloor", targetFloor.floorNumber)
-                                                transitionFeatures.add(indicator)
-                                                
-                                                Log.d(TAG, "  📍 Creating indicator: '$text' at (${geometry.coordinates()[0]}, ${geometry.coordinates()[1]})")
-                                            }
+                                        val fromFloor = floors.find { it.id == fromFloorId }
+                                        val toFloor = floors.find { it.id == toFloorId }
+                                        
+                                        if (fromFloor != null && toFloor != null) {
+                                            val direction = if (toFloor.floorNumber > fromFloor.floorNumber) "↑" else "↓"
+                                            val text = "$direction F${toFloor.floorNumber}"
+                                            
+                                            val indicator = Feature.fromGeometry(geometry)
+                                            indicator.addStringProperty("text", text)
+                                            indicator.addStringProperty("type", "transition")
+                                            transitionFeatures.add(indicator)
+                                            
+                                            Log.d(TAG, "  ✅ Creating 'go $direction' indicator at node $fromNodeId on ${fromFloor.name}")
                                         }
-                                    } else {
-                                        Log.w(TAG, "  ⚠️ Node geometry is not a Point: ${geometry?.type()}")
                                     }
-                                } else {
-                                    Log.d(TAG, "  ⚠️ No connected floors found")
+                                }
+                            }
+                            
+                            // Show "This floor" indicator on TO floor (destination)
+                            if (toFloorId == currentFloorId) {
+                                val toNode = pathNodes.find { 
+                                    val nodeIdStr = it.getStringProperty("id")
+                                    nodeIdStr?.toIntOrNull() == toNodeId
+                                }
+                                
+                                if (toNode != null) {
+                                    val geometry = toNode.geometry()
+                                    if (geometry is Point) {
+                                        val indicator = Feature.fromGeometry(geometry)
+                                        indicator.addStringProperty("text", "This floor")
+                                        indicator.addStringProperty("type", "destination")
+                                        transitionFeatures.add(indicator)
+                                        
+                                        Log.d(TAG, "  ✅ Creating 'This floor' indicator at node $toNodeId (destination)")
+                                    }
                                 }
                             }
                         }
@@ -1796,44 +1863,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Find floors connected to this node via edges
-     */
-    private fun findConnectedFloors(nodeId: Int, features: List<Feature>): List<Pair<Int, String>> {
-        val connectedFloors = mutableListOf<Pair<Int, String>>()
-        val currentFloorId = nodeToFloorMap[nodeId.toString()] ?: return connectedFloors
-        
-        // Find all edges connected to this node
-        features.filter { it.getBooleanProperty("is_path_edge") == true }.forEach { edge ->
-            val fromNodeId = edge.getNumberProperty("from_node_id")?.toInt()
-            val toNodeId = edge.getNumberProperty("to_node_id")?.toInt()
-            
-            if (fromNodeId == nodeId || toNodeId == nodeId) {
-                val connectedNodeId = if (fromNodeId == nodeId) toNodeId else fromNodeId
-                if (connectedNodeId != null) {
-                    val connectedFloorId = nodeToFloorMap[connectedNodeId.toString()]
-                    
-                    if (connectedFloorId != null && connectedFloorId != currentFloorId) {
-                        // Determine direction
-                        val currentFloor = floors.find { it.id == currentFloorId }
-                        val connectedFloor = floors.find { it.id == connectedFloorId }
-                        
-                        if (currentFloor != null && connectedFloor != null) {
-                            val direction = if (connectedFloor.floorNumber > currentFloor.floorNumber) "↑" else "↓"
-                            
-                            // Avoid duplicates
-                            if (!connectedFloors.any { it.first == connectedFloorId }) {
-                                connectedFloors.add(Pair(connectedFloorId, direction))
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        return connectedFloors
-    }
-
-    /**
      * Add transition indicators to the map
      */
     private fun addTransitionIndicatorsToMap(style: Style, indicators: List<Feature>) {
@@ -1843,10 +1872,15 @@ class MainActivity : AppCompatActivity() {
                 return
             }
             
-            // Remove existing layer and source
+            // Remove existing layers and source
+            val backgroundLayerId = "${transitionIndicatorsLayerId}_bg"
             style.getLayer(transitionIndicatorsLayerId)?.let { 
                 style.removeLayer(transitionIndicatorsLayerId)
                 Log.d(TAG, "Removed existing transition indicators layer")
+            }
+            style.getLayer(backgroundLayerId)?.let { 
+                style.removeLayer(backgroundLayerId)
+                Log.d(TAG, "Removed existing transition indicators background layer")
             }
             style.getSource(transitionIndicatorsSourceId)?.let { 
                 style.removeSource(transitionIndicatorsSourceId)
@@ -1858,21 +1892,31 @@ class MainActivity : AppCompatActivity() {
             val source = GeoJsonSource(transitionIndicatorsSourceId, featureCollection)
             style.addSource(source)
             
-            // Add symbol layer for text with high visibility
+            // Add background circle layer behind text (offset to match text position)
+            val backgroundLayerId = "${transitionIndicatorsLayerId}_bg"
+            val backgroundLayer = CircleLayer(backgroundLayerId, transitionIndicatorsSourceId)
+                .withProperties(
+                    circleRadius(20f),
+                    circleColor("#FFFFFF"), // White background
+                    circleOpacity(0.9f),
+                    circleStrokeColor("#000000"),
+                    circleStrokeWidth(2f),
+                    circleTranslate(arrayOf(0f, -20f)) // Offset to match text position
+                )
+            style.addLayer(backgroundLayer)
+            
+            // Add text layer on top with offset position
             val textLayer = org.maplibre.android.style.layers.SymbolLayer(transitionIndicatorsLayerId, transitionIndicatorsSourceId)
                 .withProperties(
                     PropertyFactory.textField(get("text")),
-                    PropertyFactory.textSize(20f), // Larger text
-                    PropertyFactory.textColor("#FFFFFF"),
-                    PropertyFactory.textHaloColor("#FF0000"), // Red halo for high visibility
-                    PropertyFactory.textHaloWidth(3f), // Thicker halo
-                    PropertyFactory.textHaloBlur(1f),
-                    PropertyFactory.textOffset(arrayOf(0f, -2.5f)),
+                    PropertyFactory.textSize(14f),
+                    PropertyFactory.textColor("#000000"), // Black text on white background
+                    PropertyFactory.textOffset(arrayOf(0f, -2.5f)), // Offset above node
                     PropertyFactory.textAnchor("bottom"),
-                    PropertyFactory.textAllowOverlap(true), // Always show
-                    PropertyFactory.textIgnorePlacement(true), // Ignore collision
+                    PropertyFactory.textAllowOverlap(true),
+                    PropertyFactory.textIgnorePlacement(true),
                     PropertyFactory.iconAllowOverlap(true),
-                    PropertyFactory.textOptional(false) // Text is required
+                    PropertyFactory.textOptional(false)
                 )
             style.addLayer(textLayer)
             
@@ -1945,6 +1989,56 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
+    
+    /**
+     * Initialize localization with ALL floor IDs to automatically determine user's floor
+     * This is called at startup after beacons from all floors are loaded
+     */
+    private fun initializeLocalizationWithAllFloors(floorIds: List<Int>) {
+        // Check if we have required Bluetooth permissions
+        if (!hasBluetoothPermissions()) {
+            Log.w(TAG, "Bluetooth permissions not granted, cannot start localization")
+            return
+        }
+
+        lifecycleScope.launch {
+            try {
+                Log.d(TAG, "Initializing localization with all floor IDs: $floorIds")
+
+                // Stop any existing localization
+                if (isLocalizationActive) {
+                    localizationController.stop()
+                    isLocalizationActive = false
+                }
+
+                // Use auto-initialization with ALL floor IDs
+                // This will scan beacons and automatically determine which floor the user is on
+                val success = localizationController.autoInitialize(
+                    availableFloorIds = floorIds,
+                    scanDurationMs = 5000 // 5 seconds
+                )
+
+                if (success) {
+                    // Start continuous localization
+                    localizationController.start()
+                    isLocalizationActive = true
+                    hasInitializedMultiFloorLocalization = true
+
+                    // Observe position updates
+                    observeLocalizationUpdates()
+
+                    Log.d(TAG, "Multi-floor localization started successfully")
+                    Toast.makeText(this@MainActivity, "🔍 Detecting your floor...", Toast.LENGTH_SHORT).show()
+                } else {
+                    Log.w(TAG, "Multi-floor auto-initialization failed")
+                    Toast.makeText(this@MainActivity, "Could not detect floor position", Toast.LENGTH_SHORT).show()
+                }
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Error initializing multi-floor localization", e)
+            }
+        }
+    }
 
     /**
      * Observe localization state updates and update the blue dot
@@ -1976,26 +2070,39 @@ class MainActivity : AppCompatActivity() {
                                 floorSelectorAdapter.setUserCurrentFloor(detectedFloorId)
                             }
                             
-                            // Auto-switch ONLY if user is navigating AND is on wrong floor display
                             val currentFloorId = currentFloor?.id
-                            if (currentNavigationPath != null && currentFloorId != null && detectedFloorId != currentFloorId) {
-                                Log.d(TAG, "User physically on different floor: current view=$currentFloorId, actual=$detectedFloorId")
-                                
-                                // Find the floor to switch to
-                                val targetFloor = floors.find { it.id == detectedFloorId }
-                                if (targetFloor != null) {
-                                    Log.d(TAG, "Auto-switching to floor: ${targetFloor.name}")
-                                    withContext(Dispatchers.Main) {
-                                        // Simulate floor button click
-                                        onFloorSelected(targetFloor)
-                                        Toast.makeText(
-                                            this@MainActivity, 
-                                            "📍 You're now on ${targetFloor.name}", 
-                                            Toast.LENGTH_SHORT
-                                        ).show()
+                            
+                            // Auto-switch in 3 cases:
+                            // 1. Initial detection (currentFloor is null)
+                            // 2. Navigation starts (handled by displayPath)
+                            // 3. User physically moved to a different floor (detectedFloorId changed)
+                            
+                            val userPhysicallyMoved = lastDetectedFloorId != null && lastDetectedFloorId != detectedFloorId
+                            val isInitial = currentFloorId == null
+                            
+                            if (isInitial || userPhysicallyMoved) {
+                                // User is on a different floor than currently displayed
+                                if (detectedFloorId != currentFloorId) {
+                                    Log.d(TAG, "Auto-switching: initial=$isInitial, physicallyMoved=$userPhysicallyMoved, from floor $lastDetectedFloorId to $detectedFloorId")
+                                    
+                                    val targetFloor = floors.find { it.id == detectedFloorId }
+                                    if (targetFloor != null) {
+                                        withContext(Dispatchers.Main) {
+                                            onFloorSelected(targetFloor)
+                                            
+                                            val message = if (isInitial) {
+                                                "📍 Located on ${targetFloor.name}"
+                                            } else {
+                                                "📍 You moved to ${targetFloor.name}"
+                                            }
+                                            Toast.makeText(this@MainActivity, message, Toast.LENGTH_SHORT).show()
+                                        }
                                     }
                                 }
                             }
+                            
+                            // Update last detected floor
+                            lastDetectedFloorId = detectedFloorId
                         }
                     }
 
@@ -2473,6 +2580,37 @@ class MainActivity : AppCompatActivity() {
             // Android 11 and below: ACCESS_FINE_LOCATION required for Bluetooth scanning
             ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
                 PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    /**
+     * Request battery optimization exemption to allow unrestricted Bluetooth scanning
+     * This prevents Android from throttling BLE scans
+     */
+    private fun requestBatteryOptimizationExemption() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val packageName = packageName
+            val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+            
+            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                Log.d(TAG, "Requesting battery optimization exemption for unrestricted BLE scanning")
+                try {
+                    val intent = android.content.Intent().apply {
+                        action = android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+                        data = android.net.Uri.parse("package:$packageName")
+                    }
+                    startActivity(intent)
+                    Toast.makeText(
+                        this,
+                        "Please allow unrestricted battery usage for accurate indoor navigation",
+                        Toast.LENGTH_LONG
+                    ).show()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to request battery optimization exemption", e)
+                }
+            } else {
+                Log.d(TAG, "Battery optimization already exempted - BLE scanning unrestricted")
+            }
         }
     }
 

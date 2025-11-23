@@ -13,6 +13,11 @@
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
     <!-- Activity recognition for step detection (Android 10+) -->
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+    <!-- Battery optimization exemption to bypass Bluetooth scan throttling -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Foreground service for continuous scanning -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
 
     <application
         android:allowBackup="true"
