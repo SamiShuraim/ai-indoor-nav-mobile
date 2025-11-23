@@ -27,6 +27,7 @@ class BackgroundBeaconMapper(private val context: Context) {
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private val isRunning = AtomicBoolean(false)
     private var scanJob: Job? = null
+    private var periodicScanJob: Job? = null
     
     // Target beacon names to map
     private var targetBeaconNames: Set<String> = emptySet()
@@ -36,6 +37,9 @@ class BackgroundBeaconMapper(private val context: Context) {
     
     // Currently discovered beacons (in this session)
     private val discoveredInSession = ConcurrentHashMap<String, String>()
+    
+    // Scan interval (once per second)
+    private val scanIntervalMs = 1000L
     
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
@@ -111,15 +115,9 @@ class BackgroundBeaconMapper(private val context: Context) {
         }
         
         isRunning.set(true)
-        startScanning()
         
-        // Start periodic check job
-        scanJob = scope.launch {
-            while (isActive && isRunning.get()) {
-                delay(30000) // Check every 30 seconds
-                logProgress()
-            }
-        }
+        // Start periodic scanning job (once per second)
+        startPeriodicScanning()
     }
     
     /**
@@ -131,6 +129,7 @@ class BackgroundBeaconMapper(private val context: Context) {
         Log.d(TAG, "Stopping background mapper")
         isRunning.set(false)
         scanJob?.cancel()
+        periodicScanJob?.cancel()
         stopScanning()
         
         logProgress()
@@ -148,18 +147,50 @@ class BackgroundBeaconMapper(private val context: Context) {
     }
     
     /**
-     * Start BLE scanning
+     * Start periodic BLE scanning (once per second)
      */
-    private fun startScanning() {
+    private fun startPeriodicScanning() {
+        periodicScanJob = scope.launch {
+            var scanCount = 0
+            while (isActive && isRunning.get()) {
+                try {
+                    // Start a 1-second scan
+                    performSingleScan()
+                    scanCount++
+                    
+                    // Log progress every 10 scans (every 10 seconds)
+                    if (scanCount % 10 == 0) {
+                        logProgress()
+                    }
+                    
+                    // Wait 1 second before next scan
+                    delay(scanIntervalMs)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error in periodic scanning", e)
+                    delay(scanIntervalMs)
+                }
+            }
+        }
+        Log.d(TAG, "Periodic background scanning started (once per second)")
+    }
+    
+    /**
+     * Perform a single scan burst
+     */
+    private suspend fun performSingleScan() {
         try {
             val settings = ScanSettings.Builder()
-                .setScanMode(ScanSettings.SCAN_MODE_LOW_POWER) // Use low power for background
+                .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY) // Higher power for better detection
                 .build()
             
             bluetoothLeScanner?.startScan(null, settings, scanCallback)
-            Log.d(TAG, "Background BLE scanning started")
+            
+            // Scan for 500ms, then stop
+            delay(500)
+            
+            bluetoothLeScanner?.stopScan(scanCallback)
         } catch (e: SecurityException) {
-            Log.e(TAG, "SecurityException starting background scan", e)
+            Log.e(TAG, "SecurityException during scan", e)
         }
     }
     

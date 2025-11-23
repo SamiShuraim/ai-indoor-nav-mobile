@@ -66,6 +66,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var fabSearch: FloatingActionButton
     private lateinit var fabClearPath: FloatingActionButton
     private lateinit var fabQrCode: FloatingActionButton
+    private lateinit var fabBeaconStatus: FloatingActionButton
     private lateinit var floorSelectorContainer: LinearLayout
     private lateinit var floorRecyclerView: RecyclerView
     private lateinit var floorSelectorAdapter: FloorSelectorAdapter
@@ -177,6 +178,7 @@ class MainActivity : AppCompatActivity() {
         fabSearch = findViewById(R.id.fabSearch)
         fabClearPath = findViewById(R.id.fabClearPath)
         fabQrCode = findViewById(R.id.fabQrCode)
+        fabBeaconStatus = findViewById(R.id.fabBeaconStatus)
         floorSelectorContainer = findViewById(R.id.floorSelectorContainer)
         floorRecyclerView = findViewById(R.id.floorRecyclerView)
         assignmentInfoContainer = findViewById(R.id.assignmentInfoContainer)
@@ -236,6 +238,10 @@ class MainActivity : AppCompatActivity() {
 
         fabQrCode.setOnClickListener {
             showQrCodeDialog()
+        }
+        
+        fabBeaconStatus.setOnClickListener {
+            showBeaconMappingStatus()
         }
 
         btnRetryApi.setOnClickListener {
@@ -421,8 +427,9 @@ class MainActivity : AppCompatActivity() {
     private fun selectFloor(floor: Floor) {
         Log.d(TAG, "selectFloor called: id=${floor.id}, number=${floor.floorNumber}, name=${floor.name}")
         
-        // Clear any existing blue dot from previous floor
-        clearLocalizationMarker()
+        // Don't clear the marker here - let the localization system manage it
+        // The observeLocalizationUpdates() function will show/hide the marker
+        // based on whether the user is actually on this floor
         
         currentFloor = floor
         floorSelectorAdapter.setSelectedFloor(floor.id)
@@ -2717,6 +2724,56 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Show beacon mapping status dialog
+     */
+    private fun showBeaconMappingStatus() {
+        val status = localizationController.getBackgroundMapperStatus()
+        
+        val dialog = Dialog(this)
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        dialog.setContentView(android.R.layout.select_dialog_item)
+        dialog.window?.setLayout(800, LinearLayout.LayoutParams.WRAP_CONTENT)
+        
+        val message = if (status != null) {
+            val progressPercent = (status.progress * 100).toInt()
+            buildString {
+                append("📡 Beacon Mapping Status\n\n")
+                append("Progress: $progressPercent%\n")
+                append("Mapped: ${status.mappedBeacons}/${status.totalBeacons}\n")
+                append("Status: ${if (status.isComplete) "✅ Complete" else "🔄 In Progress"}\n\n")
+                
+                if (status.discoveredInSession.isNotEmpty()) {
+                    append("Discovered this session:\n")
+                    status.discoveredInSession.forEach {
+                        append("  • $it\n")
+                    }
+                    append("\n")
+                }
+                
+                if (status.unmappedBeacons.isNotEmpty()) {
+                    append("Still unmapped (${status.unmappedBeacons.size}):\n")
+                    status.unmappedBeacons.take(10).forEach {
+                        append("  • $it\n")
+                    }
+                    if (status.unmappedBeacons.size > 10) {
+                        append("  ... and ${status.unmappedBeacons.size - 10} more\n")
+                    }
+                } else {
+                    append("🎉 All beacons mapped!")
+                }
+            }
+        } else {
+            "Background mapping not active.\nBeacons are loaded from cache."
+        }
+        
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Beacon Mapping Status")
+            .setMessage(message)
+            .setPositiveButton("OK", null)
+            .show()
+    }
+    
     override fun onStart() { super.onStart(); mapView.onStart() }
     override fun onResume() { super.onResume(); mapView.onResume() }
     override fun onPause() { super.onPause(); mapView.onPause() }
