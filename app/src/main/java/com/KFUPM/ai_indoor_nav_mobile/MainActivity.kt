@@ -188,6 +188,9 @@ class MainActivity : AppCompatActivity() {
         setupFloorSelector()
         mapView.onCreate(savedInstanceState)
         setupButtonListeners()
+        
+        // Request battery optimization exemption for unrestricted Bluetooth scanning
+        requestBatteryOptimizationExemption()
 
         Log.d(TAG, "tileUrl: ${BuildConfig.tileUrl}")
 
@@ -2471,6 +2474,37 @@ class MainActivity : AppCompatActivity() {
             // Android 11 and below: ACCESS_FINE_LOCATION required for Bluetooth scanning
             ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
                 PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    /**
+     * Request battery optimization exemption to allow unrestricted Bluetooth scanning
+     * This prevents Android from throttling BLE scans
+     */
+    private fun requestBatteryOptimizationExemption() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val packageName = packageName
+            val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+            
+            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                Log.d(TAG, "Requesting battery optimization exemption for unrestricted BLE scanning")
+                try {
+                    val intent = android.content.Intent().apply {
+                        action = android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+                        data = android.net.Uri.parse("package:$packageName")
+                    }
+                    startActivity(intent)
+                    Toast.makeText(
+                        this,
+                        "Please allow unrestricted battery usage for accurate indoor navigation",
+                        Toast.LENGTH_LONG
+                    ).show()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to request battery optimization exemption", e)
+                }
+            } else {
+                Log.d(TAG, "Battery optimization already exempted - BLE scanning unrestricted")
+            }
         }
     }
 
