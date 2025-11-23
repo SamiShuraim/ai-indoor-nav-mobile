@@ -1691,12 +1691,12 @@ class MainActivity : AppCompatActivity() {
 
             Log.d(TAG, "Path redrawn for floor ${currentFloor?.name}: ${pastNodes.size} visited nodes, ${futureNodes.size} remaining nodes on this floor")
 
+            // Add floor transition indicators after path is drawn
+            addFloorTransitionIndicators(style, features, currentFloorId)
+
         } catch (e: Exception) {
             Log.e(TAG, "Error redrawing path with progress", e)
         }
-        
-        // Add floor transition indicators after path is drawn
-        addFloorTransitionIndicators(style, features, currentFloorId)
     }
 
     /**
