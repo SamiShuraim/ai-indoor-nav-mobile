@@ -393,13 +393,9 @@ class MainActivity : AppCompatActivity() {
             floorSelectorAdapter.updateFloors(floors)
             floorSelectorContainer.visibility = View.VISIBLE
             
-            // Select the first floor
-            if (floors.isNotEmpty()) {
-                Log.d(TAG, "Selecting first floor: ${floors.first().name}")
-                selectFloor(floors.first())
-            } else {
-                Log.e(TAG, "No floors to select!")
-            }
+            // Don't select any floor initially at startup
+            // Let trilateration determine the user's floor first, then auto-switch
+            Log.d(TAG, "Floors loaded. Waiting for trilateration to determine user's floor...")
             
         } catch (e: Exception) {
             Log.e(TAG, "Error fetching floors", e)
@@ -420,6 +416,10 @@ class MainActivity : AppCompatActivity() {
      */
     private fun selectFloor(floor: Floor) {
         Log.d(TAG, "selectFloor called: id=${floor.id}, number=${floor.floorNumber}, name=${floor.name}")
+        
+        // Clear any existing blue dot from previous floor
+        clearLocalizationMarker()
+        
         currentFloor = floor
         floorSelectorAdapter.setSelectedFloor(floor.id)
         Log.d(TAG, "currentFloor set to: id=${currentFloor?.id}, number=${currentFloor?.floorNumber}, name=${currentFloor?.name}")
@@ -2061,26 +2061,28 @@ class MainActivity : AppCompatActivity() {
                             val currentFloorId = currentFloor?.id
                             
                             // Auto-switch floor if user is on different floor than currently displayed
-                            // This happens in two cases:
-                            // 1. Initial trilateration (to show user's actual starting floor)
-                            // 2. During navigation when user moves to a different floor
-                            if (currentFloorId != null && detectedFloorId != currentFloorId) {
-                                Log.d(TAG, "User physically on different floor: current view=$currentFloorId, actual=$detectedFloorId")
+                            // This happens in three cases:
+                            // 1. Initial trilateration (currentFloor is null)
+                            // 2. User manually switched to view a different floor
+                            // 3. User physically moved to a different floor during navigation
+                            if (currentFloorId == null || detectedFloorId != currentFloorId) {
+                                Log.d(TAG, "Floor switch needed: current view=$currentFloorId, detected=$detectedFloorId")
                                 
                                 // Find the floor to switch to
                                 val targetFloor = floors.find { it.id == detectedFloorId }
                                 if (targetFloor != null) {
                                     val isNavigating = currentNavigationPath != null
-                                    Log.d(TAG, "Auto-switching to floor: ${targetFloor.name} (navigating: $isNavigating)")
+                                    val isInitial = currentFloorId == null
+                                    Log.d(TAG, "Auto-switching to floor: ${targetFloor.name} (initial: $isInitial, navigating: $isNavigating)")
                                     withContext(Dispatchers.Main) {
                                         // Switch to the detected floor
                                         onFloorSelected(targetFloor)
                                         
                                         // Show toast message
-                                        val message = if (isNavigating) {
-                                            "📍 You're now on ${targetFloor.name}"
-                                        } else {
-                                            "📍 Located on ${targetFloor.name}"
+                                        val message = when {
+                                            isInitial -> "📍 Located on ${targetFloor.name}"
+                                            isNavigating -> "📍 You're now on ${targetFloor.name}"
+                                            else -> "📍 Switched to ${targetFloor.name}"
                                         }
                                         Toast.makeText(
                                             this@MainActivity, 
