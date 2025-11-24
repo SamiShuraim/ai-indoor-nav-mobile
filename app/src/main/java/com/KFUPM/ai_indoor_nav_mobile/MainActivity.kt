@@ -2115,7 +2115,7 @@ class MainActivity : AppCompatActivity() {
                                             }
                                             
                                             // Update map display
-                                            updateMapForFloor(poisGeoJSON, beaconsGeoJSON, routeNodesGeoJSON)
+                                            updateMapDisplayWithGeoJSON(poisGeoJSON, beaconsGeoJSON, routeNodesGeoJSON)
                                         } catch (e: Exception) {
                                             Log.e(TAG, "Error loading floor data during auto-switch", e)
                                         }
