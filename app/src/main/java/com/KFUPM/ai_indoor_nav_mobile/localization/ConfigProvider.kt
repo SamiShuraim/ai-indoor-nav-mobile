@@ -23,7 +23,9 @@ class ConfigProvider(private val context: Context) {
     private val gson = Gson()
     
     /**
-     * Fetch beacons for a floor and optionally map names to MAC addresses
+     * Fetch beacons for a floor and map names to MAC addresses
+     * Uses cached mappings first, then attempts quick scan for unmapped beacons
+     * Returns partial results if not all beacons are mapped yet
      */
     suspend fun fetchBeacons(floorId: Int, beaconNameMapper: BeaconNameMapper? = null): List<LocalizationBeacon>? {
         return withContext(Dispatchers.IO) {
@@ -43,9 +45,22 @@ class ConfigProvider(private val context: Context) {
                             val beaconsWithoutMac = beacons.filter { it.uuid.isNullOrBlank() }
                             
                             if (beaconsWithoutMac.isNotEmpty() && beaconNameMapper != null) {
-                                Log.d(TAG, "Beacons missing MAC addresses, attempting to map names to MACs...")
                                 val beaconNames = beaconsWithoutMac.mapNotNull { it.name }
-                                nameToMacMap = beaconNameMapper.mapBeaconNamesToMacAddresses(beaconNames, 5000)
+                                
+                                // First try to get cached mappings
+                                val cachedMappings = beaconNameMapper.getCachedMappings()
+                                val cachedCount = beaconNames.count { cachedMappings.containsKey(it) }
+                                
+                                Log.d(TAG, "Beacons missing MAC addresses: ${beaconNames.size}, cached: $cachedCount")
+                                
+                                // Quick scan for unmapped beacons (shorter timeout for initial load)
+                                nameToMacMap = beaconNameMapper.mapBeaconNamesToMacAddresses(beaconNames, scanDurationMs = 3000)
+                                
+                                val unmappedCount = beaconNames.size - nameToMacMap.size
+                                if (unmappedCount > 0) {
+                                    val unmapped = beaconNameMapper.getUnmappedBeacons(beaconNames)
+                                    Log.w(TAG, "Still $unmappedCount beacons unmapped: $unmapped (will be found by background mapper)")
+                                }
                             }
                             
                             // Convert to LocalizationBeacon
@@ -54,15 +69,15 @@ class ConfigProvider(private val context: Context) {
                                 val macAddress = when {
                                     // First priority: uuid field from database
                                     !beacon.uuid.isNullOrBlank() -> beacon.uuid!!.uppercase()
-                                    // Second priority: mapped MAC from beacon name
+                                    // Second priority: mapped MAC from beacon name (cached or scanned)
                                     beacon.name != null && nameToMacMap.containsKey(beacon.name) -> {
                                         val mappedMac = nameToMacMap[beacon.name]!!
-                                        Log.d(TAG, "Mapped beacon '${beacon.name}' to MAC $mappedMac")
+                                        Log.d(TAG, "Using mapping: '${beacon.name}' -> $mappedMac")
                                         mappedMac
                                     }
-                                    // No MAC address available
+                                    // No MAC address available yet
                                     else -> {
-                                        Log.w(TAG, "Beacon ${beacon.name} has no MAC address and couldn't be mapped, skipping")
+                                        Log.d(TAG, "Beacon ${beacon.name} not yet mapped (will be found by background mapper)")
                                         null
                                     }
                                 }
@@ -78,7 +93,11 @@ class ConfigProvider(private val context: Context) {
                                 }
                             }
                             
-                            Log.d(TAG, "Fetched ${locBeacons.size} beacons for floor $floorId with MAC addresses: ${locBeacons.map { it.id }}")
+                            Log.d(TAG, "Fetched ${locBeacons.size}/${beacons.size} beacons for floor $floorId with MAC addresses")
+                            if (locBeacons.size < beacons.size) {
+                                Log.d(TAG, "Note: Background mapper will continue finding unmapped beacons")
+                            }
+                            
                             locBeacons
                         } else null
                     } else {
@@ -90,6 +109,66 @@ class ConfigProvider(private val context: Context) {
                 Log.e(TAG, "Error fetching beacons", e)
                 null
             }
+        }
+    }
+    
+    /**
+     * Get all beacon names for a floor (for background mapping)
+     */
+    suspend fun fetchBeaconNames(floorId: Int): List<String>? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val url = "${ApiConstants.API_BASE_URL}${ApiConstants.Endpoints.beaconsByFloor(floorId)}"
+                val request = Request.Builder().url(url).build()
+                
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val jsonString = response.body?.string()
+                        if (jsonString != null) {
+                            val type = object : TypeToken<List<Beacon>>() {}.type
+                            val beacons = gson.fromJson<List<Beacon>>(jsonString, type)
+                            
+                            // Get all beacon names (for those without MAC addresses)
+                            val beaconNames = beacons
+                                .filter { it.uuid.isNullOrBlank() && it.name != null }
+                                .mapNotNull { it.name }
+                            
+                            Log.d(TAG, "Found ${beaconNames.size} beacon names for floor $floorId")
+                            beaconNames
+                        } else null
+                    } else {
+                        Log.e(TAG, "Failed to fetch beacon names: ${response.code}")
+                        null
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error fetching beacon names", e)
+                null
+            }
+        }
+    }
+    
+    /**
+     * Get ALL beacon names from ALL floors (for comprehensive background mapping)
+     */
+    suspend fun fetchAllBeaconNames(floorIds: List<Int>): List<String> {
+        return withContext(Dispatchers.IO) {
+            val allBeaconNames = mutableSetOf<String>()
+            
+            floorIds.forEach { floorId ->
+                try {
+                    val beaconNames = fetchBeaconNames(floorId)
+                    if (beaconNames != null) {
+                        allBeaconNames.addAll(beaconNames)
+                        Log.d(TAG, "Added ${beaconNames.size} beacon names from floor $floorId")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error fetching beacon names for floor $floorId", e)
+                }
+            }
+            
+            Log.d(TAG, "Total beacon names across all floors: ${allBeaconNames.size}")
+            allBeaconNames.toList()
         }
     }
     
@@ -155,6 +234,44 @@ class ConfigProvider(private val context: Context) {
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error fetching graph from route nodes", e)
+                null
+            }
+        }
+    }
+    
+    /**
+     * Fetch combined graph for ALL floors
+     * This is critical for multi-floor localization to work
+     */
+    suspend fun fetchCombinedGraph(floorIds: List<Int>): IndoorGraph? {
+        return withContext(Dispatchers.IO) {
+            try {
+                Log.d(TAG, "Fetching combined graph for ${floorIds.size} floors: $floorIds")
+                
+                val allNodes = mutableListOf<GraphNode>()
+                val allEdges = mutableListOf<GraphEdge>()
+                
+                // Fetch and combine graphs from all floors
+                for (floorId in floorIds) {
+                    val graph = fetchGraph(floorId)
+                    if (graph != null) {
+                        allNodes.addAll(graph.nodes)
+                        allEdges.addAll(graph.edges)
+                        Log.d(TAG, "Added ${graph.nodes.size} nodes and ${graph.edges.size} edges from floor $floorId")
+                    }
+                }
+                
+                if (allNodes.isEmpty()) {
+                    Log.e(TAG, "No nodes found across all floors!")
+                    return@withContext null
+                }
+                
+                val combinedGraph = IndoorGraph(nodes = allNodes, edges = allEdges)
+                Log.d(TAG, "✅ Combined graph: ${allNodes.size} total nodes, ${allEdges.size} total edges")
+                
+                combinedGraph
+            } catch (e: Exception) {
+                Log.e(TAG, "Error fetching combined graph", e)
                 null
             }
         }

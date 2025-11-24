@@ -49,15 +49,19 @@ class AutoInitializer(
             Log.d(TAG, "Starting auto-initialization...")
             
             // Step 1: Scan for beacons
-            Log.d(TAG, "Scanning for beacons (${scanDurationMs}ms)...")
+            Log.d(TAG, "🔍 Scanning for beacons (${scanDurationMs}ms)...")
             val rssiMap = scanForBeacons(scanDurationMs)
             
             if (rssiMap.isEmpty()) {
-                Log.e(TAG, "No beacons detected")
+                Log.e(TAG, "❌ NO BEACONS DETECTED during ${scanDurationMs}ms scan!")
+                Log.e(TAG, "This means:")
+                Log.e(TAG, "  - Either Bluetooth is OFF")
+                Log.e(TAG, "  - Or permissions are denied")
+                Log.e(TAG, "  - Or no BLE devices are nearby at all")
                 return null
             }
             
-            Log.d(TAG, "Detected ${rssiMap.size} beacons: ${rssiMap.keys}")
+            Log.d(TAG, "✅ Detected ${rssiMap.size} beacons: ${rssiMap.keys}")
             
             // Step 2: Fetch beacons for all floors to determine which floor we're on
             Log.d(TAG, "Fetching beacon data for ${availableFloorIds.size} floors...")
@@ -82,31 +86,44 @@ class AutoInitializer(
                 return null
             }
             
-            Log.d(TAG, "Determined floor: $floorId")
+            Log.d(TAG, "✅ AUTO-INIT: Determined floor: $floorId")
             
-            // Step 4: Fetch graph and config for this floor
-            val graph = configProvider.fetchGraph(floorId)
+            // Step 4: Fetch COMBINED graph and config for ALL floors
+            val graph = configProvider.fetchCombinedGraph(availableFloorIds)
             if (graph == null || graph.nodes.isEmpty()) {
-                Log.e(TAG, "No graph data for floor $floorId")
+                Log.e(TAG, "No graph data available")
                 return null
             }
             
             val config = configProvider.fetchConfig() ?: LocalizationConfig(version = "default")
-            val beacons = floorBeacons[floorId]!!
             
-            Log.d(TAG, "Loaded graph with ${graph.nodes.size} nodes, ${graph.edges.size} edges")
+            // Collect ALL beacons from ALL floors (not just detected floor)
+            val allBeacons = floorBeacons.values.flatten()
+            
+            Log.d(TAG, "✅ Loaded combined graph with ${graph.nodes.size} nodes, ${graph.edges.size} edges")
+            Log.d(TAG, "✅ Loaded ${allBeacons.size} beacons from ALL ${availableFloorIds.size} floors")
             
             // Step 5: Estimate initial node
-            val (initialNode, confidence) = estimateInitialNode(rssiMap, beacons, graph)
+            // CRITICAL: Only use beacons AND nodes from the detected floor for initial position
+            val detectedFloorBeacons = floorBeacons[floorId]!!
             
-            Log.d(TAG, "Initial position: node=${initialNode}, confidence=${String.format("%.2f", confidence)}")
+            // Get graph for ONLY the detected floor (not combined graph)
+            val detectedFloorGraph = configProvider.fetchGraph(floorId)
+            if (detectedFloorGraph == null || detectedFloorGraph.nodes.isEmpty()) {
+                Log.e(TAG, "No graph nodes for detected floor $floorId")
+                return null
+            }
+            
+            val (initialNode, confidence) = estimateInitialNode(rssiMap, detectedFloorBeacons, detectedFloorGraph)
+            
+            Log.d(TAG, "✅ AUTO-INIT: Initial node=${initialNode} on floor $floorId, confidence=${String.format("%.2f", confidence)}")
             
             AutoInitResult(
                 floorId = floorId,
                 initialNodeId = initialNode,
                 confidence = confidence,
-                beacons = beacons,
-                graph = graph,
+                beacons = allBeacons,  // Return ALL beacons from ALL floors
+                graph = graph,  // Return combined graph from ALL floors
                 config = config
             )
         } catch (e: Exception) {
@@ -117,6 +134,9 @@ class AutoInitializer(
     
     /**
      * Scan for beacons for a specified duration
+     * 
+     * IMPORTANT: We DON'T stop the scanner here anymore!
+     * The LocalizationController will reuse this scanner to avoid Android rate limits.
      */
     private suspend fun scanForBeacons(durationMs: Long): Map<String, Double> {
         val scanner = BeaconScanner(context, windowSize = 5, emaGamma = 0.5)
@@ -129,10 +149,25 @@ class AutoInitializer(
                 delay(durationMs)
             }
             
-            scanner.getCurrentRssiMap()
-        } finally {
+            val results = scanner.getCurrentRssiMap()
+            
+            // Stop scanner and add minimal delay to avoid Android BLE rate limit
+            Log.d(TAG, "Stopping temporary scanner...")
             scanner.stopScanning()
             scanner.cleanup()
+            
+            // Small 2-second delay to reduce chance of hitting Android's 5-per-30s rate limit
+            // Much faster than the previous 25-second delay
+            Log.d(TAG, "⏳ Brief 2s delay to reduce BLE rate limit risk...")
+            delay(2000)
+            
+            Log.d(TAG, "✅ AutoInitializer complete - app ready to start")
+            
+            results
+        } catch (e: Exception) {
+            scanner.stopScanning()
+            scanner.cleanup()
+            throw e
         }
     }
     
@@ -167,24 +202,30 @@ class AutoInitializer(
                 -100.0
             }
             
-            floorScores[floorId] = FloorScore(
+            val floorScore = FloorScore(
                 matchCount = matchCount,
                 mismatchCount = mismatchCount,
                 avgRssi = avgRssi,
                 totalBeacons = beacons.size
             )
             
-            Log.d(TAG, "Floor $floorId: $matchCount matches, $mismatchCount mismatches, avg RSSI: ${String.format("%.1f", avgRssi)}")
+            floorScores[floorId] = floorScore
+            
+            val computedScore = floorScore.matchCount * 10.0 + (floorScore.avgRssi + 100) / 10.0 - floorScore.mismatchCount * 2.0
+            Log.d(TAG, "Floor $floorId: $matchCount matches, $mismatchCount mismatches, avg RSSI: ${String.format("%.1f", avgRssi)}, SCORE: ${String.format("%.2f", computedScore)}")
         }
         
         // Select floor with best score
-        return floorScores.maxByOrNull { (_, score) ->
+        val selectedFloor = floorScores.maxByOrNull { (_, score) ->
             // Prioritize floors with:
             // 1. More matching beacons (high match count)
             // 2. Stronger average signal (higher avgRssi)
             // 3. Fewer mismatches
             score.matchCount * 10.0 + (score.avgRssi + 100) / 10.0 - score.mismatchCount * 2.0
         }?.key
+        
+        Log.d(TAG, "🎯 SELECTED FLOOR: $selectedFloor")
+        return selectedFloor
     }
     
     /**
