@@ -464,19 +464,6 @@ class MainActivity : AppCompatActivity() {
                 if (currentNavigationPath != null) {
                     redrawPathWithProgress()
                 }
-                
-                // Auto-click assignment button after first floor is fully loaded (only once at startup)
-                if (!hasAutoClickedAssignment) {
-                    hasAutoClickedAssignment = true
-                    delay(1000) // Give localization time to initialize
-                    withContext(Dispatchers.Main) {
-                        Log.d(TAG, "=== AUTO-CLICKING ASSIGNMENT BUTTON ===")
-                        Log.d(TAG, "currentFloor: id=${currentFloor?.id}, number=${currentFloor?.floorNumber}, name=${currentFloor?.name}")
-                        Log.d(TAG, "floors: ${floors.map { "id=${it.id}, num=${it.floorNumber}" }}")
-                        Toast.makeText(this@MainActivity, "🔄 Auto-requesting assignment...", Toast.LENGTH_LONG).show()
-                        fabAssignment.performClick()
-                    }
-                }
 
             } catch (e: Exception) {
                 Log.e(TAG, "Error loading floor data", e)
@@ -2207,7 +2194,7 @@ class MainActivity : AppCompatActivity() {
                         .withProperties(
                             circleRadius(10f),
                             circleColor("#0080FF"), // Bright blue
-                            circleOpacity(0.8f)
+                            circleOpacity(1.0f)  // FULL opacity - always bright and visible
                         )
                     style.addLayer(markerLayer)
                 }
@@ -2218,7 +2205,7 @@ class MainActivity : AppCompatActivity() {
                         .withProperties(
                             circleRadius(12f),
                             circleColor("#FFFFFF"), // White stroke
-                            circleOpacity(0.9f),
+                            circleOpacity(1.0f),  // FULL opacity
                             circleStrokeWidth(2f),
                             circleStrokeColor("#0080FF")
                         )
@@ -2768,8 +2755,8 @@ class MainActivity : AppCompatActivity() {
                 Log.d(TAG, "  Known beacons (filtered): ${knownRssi.size}")
                 Log.d(TAG, "  All beacons (raw): ${allRssi.size}")
                 
-                // Show KNOWN beacons (the ones used for localization)
-                val rssiMap = knownRssi
+                // Show ALL BLE devices (not just known beacons)
+                val rssiMap = allRssi
                 
                 if (rssiMap.isEmpty()) {
                     val debugMsg = buildString {
