@@ -390,9 +390,14 @@ class MainActivity : AppCompatActivity() {
             floorSelectorAdapter.updateFloors(floors)
             floorSelectorContainer.visibility = View.VISIBLE
             
-            // Don't select any floor initially at startup
-            // Let trilateration determine the user's floor first, then auto-switch
-            Log.d(TAG, "Floors loaded. Waiting for trilateration to determine user's floor...")
+            // IMMEDIATELY load the first floor (highest floor) to show the map
+            val firstFloor = floors.firstOrNull()
+            if (firstFloor != null) {
+                Log.d(TAG, "📍 Loading first floor immediately: ${firstFloor.name}")
+                selectFloor(firstFloor)
+            } else {
+                Log.w(TAG, "No floors available to load")
+            }
             
         } catch (e: Exception) {
             Log.e(TAG, "Error fetching floors", e)

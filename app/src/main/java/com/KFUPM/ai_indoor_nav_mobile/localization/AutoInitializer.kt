@@ -151,24 +151,17 @@ class AutoInitializer(
             
             val results = scanner.getCurrentRssiMap()
             
-            // Android rate limit: max 5 scan start/stop per 30 seconds
-            // We need to wait to ensure the continuous scanner can start without hitting the limit
-            Log.d(TAG, "⚠️ Waiting before stopping scanner to avoid Android rate limits...")
-            
-            // Stop immediately to free up resources
+            // Stop scanner and add minimal delay to avoid Android BLE rate limit
+            Log.d(TAG, "Stopping temporary scanner...")
             scanner.stopScanning()
-            
-            // Wait 30 seconds from when we STARTED to ensure rate limit window passes
-            // We already waited durationMs (5s), so wait 25 more seconds
-            val remainingWait = 30000 - durationMs
-            if (remainingWait > 0) {
-                Log.d(TAG, "⏳ Waiting ${remainingWait}ms to avoid Android BLE rate limits...")
-                Log.d(TAG, "Android allows max 5 BLE scan cycles per 30 seconds")
-                delay(remainingWait)
-            }
-            
             scanner.cleanup()
-            Log.d(TAG, "✅ Safe to start next scanner now (30s elapsed)")
+            
+            // Small 2-second delay to reduce chance of hitting Android's 5-per-30s rate limit
+            // Much faster than the previous 25-second delay
+            Log.d(TAG, "⏳ Brief 2s delay to reduce BLE rate limit risk...")
+            delay(2000)
+            
+            Log.d(TAG, "✅ AutoInitializer complete - app ready to start")
             
             results
         } catch (e: Exception) {
