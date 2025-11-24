@@ -94,6 +94,7 @@ class MainActivity : AppCompatActivity() {
     private var currentBuilding: Building? = null
     private var floors: List<Floor> = emptyList()
     private var currentFloor: Floor? = null
+    private var manualFloorOverride: Int? = null  // User manually selected floor (overrides auto-detection)
     private var currentPOIs: List<POI> = emptyList()
     private var currentBeacons: List<Beacon> = emptyList()
     private var currentRouteNodes: List<RouteNode> = emptyList()
@@ -413,9 +414,10 @@ class MainActivity : AppCompatActivity() {
     private fun selectFloor(floor: Floor) {
         Log.d(TAG, "selectFloor called: id=${floor.id}, number=${floor.floorNumber}, name=${floor.name}")
         
-        // Don't clear the marker here - let the localization system manage it
-        // The observeLocalizationUpdates() function will show/hide the marker
-        // based on whether the user is actually on this floor
+        // User manually selected a floor - set as override
+        manualFloorOverride = floor.id
+        Log.d(TAG, "🎯 Manual floor override set to: ${floor.name} (id=${floor.id})")
+        Toast.makeText(this, "📍 Showing position on ${floor.name}", Toast.LENGTH_SHORT).show()
         
         currentFloor = floor
         floorSelectorAdapter.setSelectedFloor(floor.id)
@@ -2058,38 +2060,80 @@ class MainActivity : AppCompatActivity() {
                     val (x, y) = position
                     Log.d(TAG, "Localization: node=$nodeId, pos=($x, $y), confidence=${String.format("%.2f", confidence)}")
                     
-                    // BEACON-BASED FLOOR DETECTION (same method that WORKS at startup!)
-                    val detectedFloorId = localizationController.detectFloorFromBeacons()
-                    
                     val currentDisplayedFloorId = currentFloor?.id
                     
-                    // Update floor selector to show current physical floor indicator
-                    if (nodeId != null && confidence > 0.6 && detectedFloorId != null) {
-                        withContext(Dispatchers.Main) {
-                            floorSelectorAdapter.setUserCurrentFloor(detectedFloorId)
-                        }
-                    }
-                    
-                    // AUTO-SWITCH FLOOR when beacon-based detection says so
-                    // This uses the SAME logic that works perfectly at startup!
-                    if (detectedFloorId != null && detectedFloorId != currentDisplayedFloorId) {
-                        Log.d(TAG, "🚶 FLOOR CHANGED: $currentDisplayedFloorId → $detectedFloorId")
+                    // Check if user manually overrode floor selection
+                    if (manualFloorOverride != null) {
+                        // MANUAL MODE: User selected a floor, show position on that floor
+                        Log.d(TAG, "📍 Manual floor override active: using floor $manualFloorOverride")
                         
-                        val newFloor = floors.find { it.id == detectedFloorId }
-                        if (newFloor != null) {
-                            Log.d(TAG, "🔄 SWITCHING to floor: ${newFloor.name}")
+                        // If the displayed floor doesn't match manual override, that's OK
+                        // The blue dot will still show based on the manual floor's coordinate system
+                        // (The localization system calculates position from beacons regardless of floor)
+                        
+                    } else {
+                        // AUTOMATIC MODE: Use beacon-based floor detection
+                        val detectedFloorId = localizationController.detectFloorFromBeacons()
+                        
+                        // Update floor selector to show current physical floor indicator
+                        if (nodeId != null && confidence > 0.6 && detectedFloorId != null) {
                             withContext(Dispatchers.Main) {
-                                selectFloor(newFloor)
-                                
-                                if (currentDisplayedFloorId != null) {
-                                    Toast.makeText(this@MainActivity, "🚶 ${newFloor.name}", Toast.LENGTH_SHORT).show()
+                                floorSelectorAdapter.setUserCurrentFloor(detectedFloorId)
+                            }
+                        }
+                        
+                        // AUTO-SWITCH FLOOR when beacon-based detection says so
+                        if (detectedFloorId != null && detectedFloorId != currentDisplayedFloorId) {
+                            Log.d(TAG, "🚶 FLOOR CHANGED: $currentDisplayedFloorId → $detectedFloorId")
+                            
+                            val newFloor = floors.find { it.id == detectedFloorId }
+                            if (newFloor != null) {
+                                Log.d(TAG, "🔄 SWITCHING to floor: ${newFloor.name}")
+                                withContext(Dispatchers.Main) {
+                                    // Clear manual override (this is automatic floor change)
+                                    manualFloorOverride = null
+                                    
+                                    // Update current floor without setting manual override
+                                    currentFloor = newFloor
+                                    floorSelectorAdapter.setSelectedFloor(newFloor.id)
+                                    
+                                    // Load floor GeoJSON data
+                                    lifecycleScope.launch {
+                                        try {
+                                            val (poisGeoJSON, beaconsGeoJSON, routeNodesGeoJSON, routeNodesList) = coroutineScope {
+                                                val poisDeferred = async { apiService.getPOIsByFloorAsGeoJSON(newFloor.id) }
+                                                val beaconsDeferred = async { apiService.getBeaconsByFloorAsGeoJSON(newFloor.id) }
+                                                val routeNodesDeferred = async { apiService.getRouteNodesByFloorAsGeoJSON(newFloor.id) }
+                                                val routeNodesListDeferred = async { apiService.getRouteNodesByFloor(newFloor.id) }
+                                                
+                                                Quadruple(
+                                                    poisDeferred.await(),
+                                                    beaconsDeferred.await(),
+                                                    routeNodesDeferred.await(),
+                                                    routeNodesListDeferred.await()
+                                                )
+                                            }
+                                            
+                                            // Update map display
+                                            updateMapForFloor(poisGeoJSON, beaconsGeoJSON, routeNodesGeoJSON)
+                                        } catch (e: Exception) {
+                                            Log.e(TAG, "Error loading floor data during auto-switch", e)
+                                        }
+                                    }
+                                    
+                                    if (currentDisplayedFloorId != null) {
+                                        Toast.makeText(this@MainActivity, "🚶 ${newFloor.name}", Toast.LENGTH_SHORT).show()
+                                    }
                                 }
                             }
                         }
                     }
                     
-                    // Update last detected floor
-                    lastDetectedFloorId = detectedFloorId
+                    // Update last detected floor (only in automatic mode)
+                    if (manualFloorOverride == null) {
+                        val detectedFloorId = localizationController.detectFloorFromBeacons()
+                        lastDetectedFloorId = detectedFloorId
+                    }
                     
                     // ALWAYS show blue dot when we have a position
                     // Let the auto-switch handle floor changes
@@ -2760,29 +2804,57 @@ class MainActivity : AppCompatActivity() {
                     return@launch
                 }
                 
+                // Get beacon name mappings from cache
+                val cache = com.KFUPM.ai_indoor_nav_mobile.localization.BeaconMappingCache(this@MainActivity)
+                val cachedMappings = cache.getMappings()
+                
+                // Reverse map: MAC -> Name
+                val macToName = cachedMappings.entries.associate { (name, mac) -> mac to name }
+                
                 // Sort by signal strength (strongest first)
                 val sortedBeacons = rssiMap.entries.sortedByDescending { it.value }
                 
-                val message = buildString {
-                    append("📡 Nearby Beacons (${sortedBeacons.size})\n")
-                    append("Sorted by signal strength\n\n")
+                // Create list of items with mapping info
+                val beaconItems = sortedBeacons.map { (mac, rssi) ->
+                    val name = macToName[mac]
+                    val signalBars = getSignalBars(rssi)
+                    val rssiFormatted = String.format("%.0f", rssi)
                     
-                    sortedBeacons.forEach { (beaconId, rssi) ->
-                        val signalBars = getSignalBars(rssi)
-                        val rssiFormatted = String.format("%.0f", rssi)
-                        append("$signalBars $beaconId\n")
-                        append("   RSSI: ${rssiFormatted} dBm\n\n")
+                    if (name != null) {
+                        // Known beacon
+                        "$signalBars [$name] $mac\n   RSSI: ${rssiFormatted} dBm"
+                    } else {
+                        // Unknown beacon - show with map icon
+                        "$signalBars 📍 $mac (UNMAPPED)\n   RSSI: ${rssiFormatted} dBm - Tap 📍 to map"
                     }
                 }
                 
+                val beaconArray = beaconItems.toTypedArray()
+                
                 withContext(Dispatchers.Main) {
                     android.app.AlertDialog.Builder(this@MainActivity)
-                        .setTitle("📡 Nearby Beacons")
-                        .setMessage(message)
-                        .setPositiveButton("Close", null)
+                        .setTitle("📡 Nearby Beacons (${sortedBeacons.size})")
+                        .setItems(beaconArray) { _, which ->
+                            val selectedBeacon = sortedBeacons[which]
+                            val mac = selectedBeacon.key
+                            val name = macToName[mac]
+                            
+                            if (name == null) {
+                                // Unmapped beacon - show mapping dialog
+                                showBeaconMappingDialog(mac, selectedBeacon.value)
+                            } else {
+                                // Already mapped - just show info
+                                android.app.AlertDialog.Builder(this@MainActivity)
+                                    .setTitle("Beacon Info")
+                                    .setMessage("Name: $name\nMAC: $mac\nRSSI: ${String.format("%.0f", selectedBeacon.value)} dBm")
+                                    .setPositiveButton("OK", null)
+                                    .show()
+                            }
+                        }
                         .setNeutralButton("Refresh") { _, _ ->
                             showNearbyBeacons()
                         }
+                        .setNegativeButton("Close", null)
                         .show()
                 }
             } catch (e: Exception) {
@@ -2809,6 +2881,38 @@ class MainActivity : AppCompatActivity() {
             rssi >= -80 -> "📶"       // Weak
             else -> "📵"              // Very Weak
         }
+    }
+    
+    /**
+     * Show dialog to map a beacon to a name
+     */
+    private fun showBeaconMappingDialog(mac: String, rssi: Double) {
+        val input = android.widget.EditText(this)
+        input.hint = "Enter beacon name (e.g., G)"
+        input.inputType = android.text.InputType.TYPE_CLASS_TEXT
+        
+        android.app.AlertDialog.Builder(this)
+            .setTitle("📍 Map Beacon")
+            .setMessage("You are standing next to:\n$mac\nRSSI: ${String.format("%.0f", rssi)} dBm\n\nEnter a name for this beacon:")
+            .setView(input)
+            .setPositiveButton("Save") { _, _ ->
+                val beaconName = input.text.toString().trim()
+                if (beaconName.isNotEmpty()) {
+                    // Save mapping
+                    val cache = com.KFUPM.ai_indoor_nav_mobile.localization.BeaconMappingCache(this)
+                    cache.saveMapping(beaconName, mac)
+                    
+                    Toast.makeText(this, "✅ Mapped '$beaconName' → $mac", Toast.LENGTH_LONG).show()
+                    Log.d(TAG, "User mapped beacon: '$beaconName' → $mac")
+                    
+                    // Refresh the beacon list
+                    showNearbyBeacons()
+                } else {
+                    Toast.makeText(this, "❌ Beacon name cannot be empty", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
     
     override fun onStart() { super.onStart(); mapView.onStart() }
