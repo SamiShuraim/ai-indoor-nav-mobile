@@ -390,11 +390,11 @@ class MainActivity : AppCompatActivity() {
             floorSelectorAdapter.updateFloors(floors)
             floorSelectorContainer.visibility = View.VISIBLE
             
-            // IMMEDIATELY load the first floor (highest floor) to show the map
-            val firstFloor = floors.firstOrNull()
-            if (firstFloor != null) {
-                Log.d(TAG, "📍 Loading first floor immediately: ${firstFloor.name}")
-                selectFloor(firstFloor)
+            // IMMEDIATELY load Floor 1 (lowest floor) to show the map
+            val lowestFloor = floors.lastOrNull() // List is sorted descending, so last = lowest
+            if (lowestFloor != null) {
+                Log.d(TAG, "📍 Loading Floor 1 (lowest floor) immediately: ${lowestFloor.name}")
+                selectFloor(lowestFloor)
             } else {
                 Log.w(TAG, "No floors available to load")
             }
