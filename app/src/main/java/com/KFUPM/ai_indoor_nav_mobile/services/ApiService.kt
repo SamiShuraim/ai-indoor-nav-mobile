@@ -12,9 +12,14 @@ import okhttp3.MediaType.Companion.toMediaType
 import org.maplibre.geojson.FeatureCollection
 
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 
 class ApiService {
-    private val client = OkHttpClient()
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
+        .build()
     private val gson = Gson()
     
     companion object {
