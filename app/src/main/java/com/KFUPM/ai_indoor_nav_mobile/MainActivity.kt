@@ -1889,7 +1889,6 @@ class MainActivity : AppCompatActivity() {
             style.addSource(source)
             
             // Add background circle layer behind text
-            val backgroundLayerId = "${transitionIndicatorsLayerId}_bg"
             val backgroundLayer = CircleLayer(backgroundLayerId, transitionIndicatorsSourceId)
                 .withProperties(
                     circleRadius(18f),
