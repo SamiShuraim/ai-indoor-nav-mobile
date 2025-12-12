@@ -287,6 +287,24 @@ class HmmEngine(
     }
     
     /**
+     * Get current posteriors (probabilities, not log)
+     */
+    fun getCurrentPosteriors(): Map<String, Double> {
+        // Convert log posteriors to regular probabilities
+        return logPosteriorPrev.mapValues { exp(it.value) }
+    }
+    
+    /**
+     * Get top N most likely nodes based on current posteriors
+     */
+    fun getTopNodes(n: Int = 3): List<String> {
+        return logPosteriorPrev.entries
+            .sortedByDescending { it.value }
+            .take(n)
+            .map { it.key }
+    }
+    
+    /**
      * Reset engine
      */
     fun reset() {
